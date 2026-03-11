@@ -1,0 +1,1293 @@
+create or replace PROCEDURE          "INSPOSTGIL9001" 
+/*---------------------------------------------------------------------------------------*/
+/* NOMBRE    : INSUDB.INSPOSTGIL9001                                                     */
+/* OBJETIVO  : GENERA LA INFORMACION PARA LA INTERFAZ DE CONTABILIDAD                    */
+/* PARAMETROS: 1 - SKEY       : CLAVE DEL PROCESO                                        */
+/*             2.- NSHEET     : CODIGO DE INTERFAZ                                       */
+/*             3 - NUSERCODE  : CODIGO DE USUARIO                                        */
+/*             4 - NERROR     : NUMERO DE ERROR                                          */
+/*             5 - SERRORDESC : DESCCRIPCION DEL ERROR                                   */
+/*                                                                                       */
+/* SOURCESAFE INFORMATION:                                                               */
+/*     $AUTHOR:: LORETO PIZARRO $                                                        */
+/*     $DATE:: 28/07/04 4:16P $                                                          */
+/*     $REVISION:: 1 $                                                                   */
+/*---------------------------------------------------------------------------------------*/
+(  SKEY               T_INTERFACE.SKEY%TYPE,
+   NSHEET             MASTERSHEET.NSHEET%TYPE,
+   NUSERCODE          POLICY.NUSERCODE%TYPE,
+   DSTARTDATE         POLICY.DSTARTDATE%TYPE,
+   DEND_DATE          POLICY.DEXPIRDAT%TYPE,
+   NBRANCH            POLICY.NBRANCH%TYPE,
+   NPRODUCT           POLICY.NPRODUCT%TYPE,
+   NPOLICY            POLICY.NPOLICY%TYPE,
+   SCLIENT            CERTIFICAT.SCLIENT%TYPE,
+   NERROR       OUT   T_ERR_INTERFACE.NERROR%TYPE,
+   SERRORDESC   OUT   VARCHAR2) AUTHID CURRENT_USER AS
+   
+   NCONCEPT              CHEQUES.NCONCEPT%TYPE;
+   SREQUEST_TY           CHEQUES.SREQUEST_TY%TYPE;
+   NCURRENCYORI          CHEQUES.NCURRENCYORI%TYPE;
+   NAMOUNT               CHEQUES.NAMOUNT%TYPE;
+   NAFECT                CHEQUES.NAFECT%TYPE;
+   NEXENT                CHEQUES.NEXENT%TYPE;
+   NTAX_AMOUNT           CHEQUES.NTAX_AMOUNT%TYPE;
+   NCURRENCYPAY          CHEQUES.NCURRENCYPAY%TYPE;
+   NAMOUNTPAY            CHEQUES.NAMOUNTPAY%TYPE;
+   DSTAT_DATE            CHEQUES.DSTAT_DATE%TYPE;
+   NREQUEST_NU           CHEQUES.NREQUEST_NU%TYPE;
+   NAGENCY               CHEQUES.NAGENCY%TYPE;
+   NCERTIF               LOANS.NCERTIF%TYPE;
+   NCODE                 LOANS.NCODE%TYPE;
+   SCLIENAME             CLIENT.SCLIENAME%TYPE;
+   SNAME                 TAB_FN_INSTITUTION.SNAME%TYPE;
+   NTYPE_MOVE            UL_MOVE_ACC_POL.NTYPE_MOVE%TYPE;
+   NINSTITUTION          UL_MOVE_ACC_POL.NINSTITUTION%TYPE;
+   SCLIENT_DEST          UL_MOVE_ACC_POL.SCLIENT_DEST%TYPE;
+   NORIGIN               UL_MOVE_ACC_POL.NORIGIN%TYPE;
+   SBRANCHT              PRODMASTER.SBRANCHT%TYPE;
+   NNUM_RELPAY           CHEQUES.NNUM_RELPAY%TYPE;
+   NEXCHANGE_AUX         CLAIM_HIS.NEXCHANGE%TYPE;
+   NCOUNT                NUMBER;
+   NCOUNT_AUX            NUMBER;
+   NPOLICY_AUX           POLICY.NPOLICY%TYPE;
+   C_CLIENT              REACLIENTPKG.RCT1;
+   R_CLIENT              C_CLIENT%ROWTYPE;
+   NCERTIF_AUX           CLAIM.NCERTIF%TYPE;
+   SNUMFORM_AUX          CLAIM.SNUMFORM%TYPE;
+   DDECLADAT_AUX         CLAIM.DDECLADAT%TYPE;
+   NCAUSECOD_AUX         CLAIM.NCAUSECOD%TYPE;
+   NRELASHIP_AUX         CLAIM.NRELASHIP%TYPE;
+   NRENEWALNUM_CERT      CERTIFICAT.NRENEWALNUM%TYPE;
+   DSTARTDATE_CERT       CERTIFICAT.DSTARTDATE%TYPE;
+   DEXPIRDAT_CERT        CERTIFICAT.DEXPIRDAT%TYPE;
+   NCAPITAL_CERT         CERTIFICAT.NCAPITAL%TYPE;
+   NGROUP_LIFE           CERTIFICAT.NGROUP%TYPE;
+   SGROUP_GROUPS         GROUPS.SDESCRIPT%TYPE;
+   NCAPITAL_COVER        COVER.NCAPITAL%TYPE;
+   NSEQUENCE             TMP_GIL104.NSEQUENCE%TYPE;
+   SRELATION             TABLE15.SDESCRIPT%TYPE;
+   SDESCRIPT_MODUL       TAB_MODUL.SDESCRIPT%TYPE;
+   SCLIENT_INTER         CLIENT.SCLIENT%TYPE;
+   SDIGIT_INTER          CLIENT.SDIGIT%TYPE;
+   SCLIENAME_INTER       CLIENT.SCLIENAME%TYPE;
+   SCLIENT_TIT           CLIENT.SCLIENT%TYPE;
+   SDIGIT_TIT            CLIENT.SDIGIT%TYPE;
+   SCLIENAME_TIT         CLIENT.SCLIENAME%TYPE;
+   CC_DESCRIPT           CLAIM_CAUS.SDESCRIPT%TYPE;
+   SCLIENAME_PAY         CLIENT.SCLIENAME%TYPE;
+   DSTARTDATE_POL        POLICY.DSTARTDATE%TYPE;
+   DEXPIRDAT_POL         POLICY.DEXPIRDAT%TYPE;
+   DDATE_ORIGI_POL       POLICY.DDATE_ORIGI%TYPE;
+   NOFFICE_POL           POLICY.NOFFICE%TYPE;
+   NPAYFREQ_POL          POLICY.NPAYFREQ%TYPE;
+   NCAPITAL_POL          POLICY.NCAPITAL%TYPE;
+   SNAMOUNT_AUX_I        TMP_GIL104.SNAMOUNT_I%TYPE;
+   SNAMOUNT_AUX_II       TMP_GIL104.SNAMOUNT_II%TYPE;
+   NINTERTYPE_AUX        INTERMEDIA.NINTERTYP%TYPE;
+   SINTERCLIENT_AUX      INTERMEDIA.SCLIENT%TYPE;
+   SINTERNAME_AUX        CLIENT.SCLIENAME%TYPE;
+   SCLIENT_CON           CLIENT.SCLIENT%TYPE;
+   SCLIENAME_CON         CLIENT.SCLIENAME%TYPE;
+/*- EJECUTIVO COMERCIAL ROLE=65 */
+   SCLIENT_COMERCIAL     CLIENT.SCLIENT%TYPE;
+   SCLIENAME_COMERCIAL   CLIENT.SCLIENAME%TYPE;
+   NSUCURSAL_COMERCIAL   CLIENT.NOFFICE%TYPE;
+/*- VARIABLE DE LA FRECUENCIA DE PAGO HOMOLOGADA */
+   NPAYFREQ_HO_INT       CERTIFICAT.NPAYFREQ%TYPE;
+   NCURRENCY_INT         PREMIUM.NCURRENCY%TYPE;
+   DEFFECDATE_INT        PREMIUM.DEFFECDATE%TYPE;
+   SPERIOD_INT           CHAR (6);
+   NBRANCHLED_INT        DETAIL_PRE.NBRANCH_LED%TYPE;
+   SSTACLAIM_AUX         CLAIM.SSTACLAIM%TYPE;
+   NCESSIONNU            NUMERATOR.NLASTNUMB%TYPE;
+   NNUMBER               REINSURAN.NNUMBER%TYPE;
+   
+/*-CAMPOS DE LA TABLA TMP_GIL90000 QUE SE MANEJAN SEGUN INDICADOR */
+   T_NBRANCH_LED         TMP_GIL9000.NBRANCH_LED%TYPE;
+   T_SCOUNTRY            TMP_GIL9000.SCOUNTRY%TYPE;
+   T_SCENTERCOST         TMP_GIL9000.SCENTERCOST%TYPE;
+   T_SCASHFLOW           TMP_GIL9000.SCASHFLOW%TYPE;
+   T_SGEOZONE            TMP_GIL9000.SGEOZONE%TYPE;
+   T_NTAX                TMP_GIL9000.NTAX%TYPE;
+   T_NPOLICY             TMP_GIL9000.NPOLICY%TYPE;
+   T_SCLIENT             TMP_GIL9000.SCLIENT%TYPE;
+
+/*- CURSOR PARA LA BUSQUEDA DE TODAS LAS POLIZAS */
+   CURSOR C_CUR_PRINC
+   IS
+      SELECT   /*+ INDEX (POL XPKPOLICY) */
+               CV.SCERTYPE, CV.NBRANCH, CV.NPRODUCT, CV.NPOLICY, CV.NCOVER,
+               CV.NROLE, CV.NCURRENCY, CV.NMODULEC, POL.SCOLINVOT,
+               CERT.SREINSURA, SUM (CV.NPREMIUM) NPREMIUM,
+               SUM (CV.NPREMIUM_O) NPREMIUM_O, CV.DEFFECDATE
+          FROM COVER CV, CERTIFICAT CERT, POLICY POL, CLIENT CL
+         WHERE CERT.SCERTYPE = CV.SCERTYPE
+           AND CERT.NBRANCH = CV.NBRANCH
+           AND CERT.NPRODUCT = CV.NPRODUCT
+           AND CERT.NPOLICY = CV.NPOLICY
+           AND CERT.NCERTIF = CV.NCERTIF
+           AND POL.SCERTYPE = CERT.SCERTYPE
+           AND POL.NBRANCH = CERT.NBRANCH
+           AND POL.NPRODUCT = CERT.NPRODUCT
+           AND POL.NPOLICY = CERT.NPOLICY
+           AND CL.SCLIENT = CERT.SCLIENT
+           AND CL.SCLIENT = POL.SCLIENT
+           --AND CERT.NPOLICY   = INSPOSTGIL9001.NPOLICY
+           AND CV.NROLE = 2
+      GROUP BY CV.SCERTYPE,
+               CV.NBRANCH,
+               CV.NPRODUCT,
+               CV.NPOLICY,
+               CV.NCOVER,
+               CV.NROLE,
+               CV.NCURRENCY,
+               CV.NMODULEC,
+               POL.SCOLINVOT,
+               CERT.SREINSURA,
+               CV.DEFFECDATE;
+
+/*- CURSOR PARA LA BUSQUEDA DE LA PRIMA DIRECTA */
+   CURSOR C_CUR_DETAIL_PRE (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCOVER_P     COVER.NCOVER%TYPE
+   )
+   IS
+      SELECT   PRM.NPOLICY NPOLICY, PRE_CE.NDET_CODE, PRM_MO.NTYPE NMOVTYPE,
+               PRM_MO.NCURRENCY NCURRENCY_M, PRE_CE.NBRANCH_LED,
+               
+               --PRM_MO.DLEDGERDAT,
+               SUM (PRE_CE.NPREMIUME) NPREMIUME,
+               SUM (PRE_CE.NPREMIUMA) NPREMIUMA,
+               SUM (PRE_CE.NTAXAMOUNT) NPREMIUMVAT,
+               SUM (PRE_CE.NPREMIUM) NPREMIUM,
+               SUM (PRM.NTRATYPEI) NPREMIUMORIGIN,
+               SUM (PRM_MO.NBALANCE) NPREMIUMD,
+               SUM ((  PRE_CE.NPREMIUM
+                     + NVL (PRE_CE.NTAXAMOUNT, 0)
+                     + NVL (PRE_CE.NRECAMOUNT, 0)
+                     - NVL (PRE_CE.NDESCAMOUNT, 0)
+                    )
+                   ) NPREMIUMB,
+               PRM.NCURRENCY  , PRM_MO.DSTATDATE DEFFECDATE ,
+               SUM(PRE_CE.NCOMMISION) NCOMMISION,
+               PRM.NINTERMED
+          FROM DETAIL_PRE PRE_CE,
+               PREMIUM PRM,
+               PREMIUM_MO PRM_MO,
+               TABLE6 T6,
+               TABLE24 T24
+         WHERE PRM.SCERTYPE = PRE_CE.SCERTYPE
+           AND PRM.NBRANCH = PRE_CE.NBRANCH
+           AND PRM.NPRODUCT = PRE_CE.NPRODUCT
+           AND PRM.NRECEIPT = PRE_CE.NRECEIPT
+           AND PRM.NDIGIT = PRE_CE.NDIGIT
+           AND PRM.NPAYNUMBE = PRE_CE.NPAYNUMBE
+           AND PRM.SCERTYPE = PRM_MO.SCERTYPE
+           AND PRM.NBRANCH = PRM_MO.NBRANCH
+           AND PRM.NPRODUCT = PRM_MO.NPRODUCT
+           AND PRM.NRECEIPT = PRM_MO.NRECEIPT
+           AND PRM.NDIGIT = PRM_MO.NDIGIT
+           AND PRM.NPAYNUMBE = PRM_MO.NPAYNUMBE
+           AND T6.NTYPE_TRAN = PRM_MO.NTYPE
+           AND T24.NTRATYPEI = PRM.NTRATYPEI
+           AND PRM.SCERTYPE = SCERTYPE_P
+           AND PRM.NBRANCH = NBRANCH_P
+           AND PRM.NPRODUCT = NPRODUCT_P
+           AND PRM.NPOLICY = NPOLICY_P
+           AND PRM.NCERTIF = 0
+           AND PRE_CE.NDET_CODE = NCOVER_P
+           AND PRM_MO.DLEDGERDAT >= INSPOSTGIL9001.DSTARTDATE
+           AND PRM_MO.DLEDGERDAT <= INSPOSTGIL9001.DEND_DATE
+           AND PRE_CE.STYPE_DETAI = '1'
+      GROUP BY PRM.NPOLICY,
+               PRE_CE.NDET_CODE,
+               PRM_MO.NTYPE,
+               PRM_MO.NCURRENCY,
+               PRE_CE.NBRANCH_LED, PRM.NCURRENCY  , 
+               PRM_MO.DSTATDATE;
+
+/*- CURSOR PARA LA BUSQUEDA DEL REASEGURO*/
+   CURSOR C_CUR_REINSURAN (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE
+   )
+   IS
+      SELECT PC.NCOMPANY, PC.NSHARE 
+        FROM REINSURAN R
+        JOIN PART_CONTR PC
+          ON PC.NNUMBER = R.NNUMBER
+         AND PC.NTYPE = R.NTYPE_REIN
+         AND PC.NTYPE_REL = 1
+         AND PC.DEFFECDATE <= SYSDATE
+         AND (PC.DNULLDATE IS NULL OR NVL(PC.DNULLDATE,SYSDATE) > SYSDATE)  
+       WHERE R.NTYPE_REIN > 1
+         AND R.SCERTYPE = SCERTYPE_P
+         AND R.NBRANCH  = NBRANCH_P
+         AND R.NPRODUCT = NPRODUCT_P
+         AND R.NPOLICY  = NPOLICY_P
+         AND R.NCERTIF  = 0;
+               
+/*- CURSOR PARA LA BUSQUEDA DE LA PRIMA CEDIDA */
+   CURSOR C_CUR_CESSION_PR (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCOVER_P     COVER.NCOVER%TYPE
+   )
+   IS
+      SELECT   C.SREGSVS SSUPERINNMBR, C.SNATIONAL,
+               CTR_PRO.NNUMBER NREINSCONTRACNMBR, CTR_PRO.NTYPE NREINSTYPE,
+               CESS_PR.NCONCEPT NPREMIUMTYPE,
+               SUM (CESS_PR.NCESSPREM) NCESSPREM,
+               CESS_PR.NCOMMISSION NDISCAMNT, CESS_PR.NCAPITAL,
+               CTR_PRO.NNUMBER, CTR_PRO.NTYPE SREINSTYPE, 0 NTAXRATE,
+               0 NEXCESSLOSS, 0 NCAPITALCESSION, NMODULEC, CESS_PR.NCURRENCY,
+               CESS_PR.DEFFECDATE
+          FROM CESSION_PR CESS_PR, COMPANY C, CLIENT CLI, CONTRPROC CTR_PRO
+         WHERE CESS_PR.NCOMPANY = C.NCOMPANY
+           AND C.SCLIENT = CLI.SCLIENT
+           AND CTR_PRO.NNUMBER = CESS_PR.NNUMBER
+           AND CTR_PRO.NBRANCH = CESS_PR.NBRANCH_REI
+           AND CTR_PRO.NTYPE = CESS_PR.NTYPE
+           AND CESS_PR.SCERTYPE = SCERTYPE_P
+           AND CESS_PR.NBRANCH = NBRANCH_P
+           AND CESS_PR.NPRODUCT = NPRODUCT_P
+           AND CESS_PR.NPOLICY = NPOLICY_P
+           AND CESS_PR.NCOVER = NCOVER_P
+      GROUP BY C.SREGSVS,
+               C.SNATIONAL,
+               CTR_PRO.NNUMBER,
+               CTR_PRO.NTYPE,
+               CESS_PR.NCONCEPT,
+               CESS_PR.NCOMMISSION,
+               CESS_PR.NCAPITAL,
+               CTR_PRO.NNUMBER,
+               CTR_PRO.NTYPE,
+               0,
+               0,
+               0,
+               NMODULEC,CESS_PR.NCURRENCY, CESS_PR.DEFFECDATE;
+
+/*- CURSOR PARA LA BUSQUEDA DE LA COMISION */
+   CURSOR C_CUR_COMMISS_PR (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE
+   )
+   IS
+      SELECT   CO.NPERCENT, CO.SCOMMITYP, CP.NCOM_EXEN, SUM (CP.NCOM_AFEC),
+               SUM (CP.NAMOUNT), PD.NNOTCANCELDAY, IT.NLEGAL_SCH,
+               PR.DEFFECDATE
+          FROM PREMIUM PR,
+               COMMISSION CO,
+               COMMISS_PR CP,
+               INTERMEDIA IT,
+               PRODUCT PD
+         WHERE CO.SCERTYPE = SCERTYPE_P
+           AND CO.NBRANCH = NBRANCH_P
+           AND CO.NPRODUCT = NPRODUCT_P
+           AND CO.NPOLICY = NPOLICY_P
+           AND PR.SCERTYPE = CO.SCERTYPE
+           AND PR.NBRANCH = CO.NBRANCH
+           AND PR.NPRODUCT = CO.NPRODUCT
+           AND PR.NPOLICY = CO.NPOLICY
+           AND PR.NCERTIF = CO.NCERTIF
+           AND PR.NSTATUS_PRE IN (1, 4)
+           AND CP.SCERTYPE = PR.SCERTYPE
+           AND CP.NRECEIPT = PR.NRECEIPT
+           AND CP.NPRODUCT = PR.NPRODUCT
+           AND CP.NBRANCH = PR.NBRANCH
+           AND CP.NDIGIT = PR.NDIGIT
+           AND CP.NPAYNUMBE = PR.NPAYNUMBE
+           AND IT.NINTERMED = CO.NINTERMED
+           AND PD.NBRANCH = CO.NBRANCH
+           AND PD.NPRODUCT = CO.NPRODUCT
+           AND PD.DEFFECDATE <= CO.DEFFECDATE
+           AND (PD.DNULLDATE > CO.DEFFECDATE OR PD.DNULLDATE IS NULL)
+      GROUP BY CO.NPERCENT,
+               CO.SCOMMITYP,
+               CP.NCOM_EXEN,
+               PD.NNOTCANCELDAY,
+               IT.NLEGAL_SCH, PR.DEFFECDATE;
+
+   CURSOR C_CUR_COMMISS_PG (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCERTIF_P    CERTIFICAT.NCERTIF%TYPE
+   )
+   IS
+      /*  COMISIONES PAGADAS */
+      SELECT CO.NPERCENT, CO.SCOMMITYP, PD.NNOTCANCELDAY, IT.NLEGAL_SCH,
+             NVL (PC.NAMOUNT, 0) NCOMAMNT, NVL (PC.NTAX, 0) NCOMVAT,
+             (NVL (PC.NAMOUNT, 0) + NVL (PC.NTAX, 0)) NCOMGROSS,
+             PD.DEFFECDATE
+        FROM PREMIUM PR, COMMISSION CO, PAY_COMM PC, INTERMEDIA IT,
+             PRODUCT PD
+       WHERE CO.SCERTYPE = SCERTYPE_P
+         AND CO.NBRANCH = NBRANCH_P
+         AND CO.NPRODUCT = NPRODUCT_P
+         AND CO.NPOLICY = NPOLICY_P
+         AND CO.NCERTIF = 0
+         AND PR.SCERTYPE = CO.SCERTYPE
+         AND PR.NBRANCH = CO.NBRANCH
+         AND PR.NPRODUCT = CO.NPRODUCT
+         AND PR.NPOLICY = CO.NPOLICY
+         --AND PR.NCERTIF     = CO.NCERTIF
+         AND PR.NSTATUS_PRE NOT IN (1, 4)
+         AND PC.NPRODUCT = PR.NPRODUCT
+         AND PC.NBRANCH = PR.NBRANCH
+         AND PC.NCERTIF = PR.NCERTIF
+         AND PC.NDOCNUMBE = PR.NRECEIPT
+         AND IT.NINTERMED = CO.NINTERMED
+         AND PD.NBRANCH = CO.NBRANCH
+         AND PD.NPRODUCT = CO.NPRODUCT
+         AND PD.DEFFECDATE <= CO.DEFFECDATE
+         AND (PD.DNULLDATE > CO.DEFFECDATE OR PD.DNULLDATE IS NULL);
+
+/*- CURSOR PARA EL MANEJO DE RESERVAS MATEMATICAS */
+   CURSOR C_CUR_RESERVE_LIFE (
+      NBRANCH_P    CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT_P   CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCOVER_P     COVER.NCOVER%TYPE,
+      NMODULEC_P   RESERVE_LIFE.NMODULEC%TYPE
+--                               ,SCLIENT_P    RESERVE_LIFE.SCLIENT%TYPE
+   )
+   IS
+/*- OJO SE DEBE BUSCAR SOLO PARA EL PERIODO QUE SE ESTA TRABAJANDO */
+      SELECT   NTYPE_RESERVE NRESERVETYPE, SUM (NRESERVE) NRESERVEAMNT, NCURRENCY,
+               MAX(DEFFECDATE) DEFFECDATE
+          FROM RESERVE_LIFE
+         WHERE NBRANCH = NBRANCH_P
+           AND NPRODUCT = NPRODUCT_P
+           AND NPOLICY = NPOLICY_P
+           AND NYEAR > 0
+           AND NMONTH > 0
+           AND NMODULEC = NMODULEC_P
+           AND NCOVER = NCOVER_P
+      --AND SCLIENT  = SCLIENT_P
+      GROUP BY NTYPE_RESERVE, NCURRENCY ;
+
+/*- CURSOR PARA EL MANEJO DE RESERVAS MATEMATICAS */
+   CURSOR C_CUR_RESERVE_GEN (NBRANCH_P        CERTIFICAT.NBRANCH%TYPE,
+                             NPRODUCT_P       CERTIFICAT.NPRODUCT%TYPE,
+                             NPOLICY_P        CERTIFICAT.NPOLICY%TYPE,
+                             C_INIYEARMONTH   CHAR,
+                             C_ENDYEARMONTH   CHAR)  IS
+/*- OJO SE DEBE BUSCAR SOLO PARA EL PERIODO QUE SE ESTA TRABAJANDO */
+      SELECT   NTYPE NRESERVETYPE, SUM (R.NLOCRESERVE) NRESERVE, T.SDESCRIPT,
+               T.SINDBRANCH_LED, T.SFECU, T.SPGCE, T.SACCOUNT,
+               T.SDESC_ACCOUNT, T.STYPACCOUNT, T.SCOUNTRY, T.SINDCENTERCOST,
+               T.SINDCASHFLOW, T.SINDGEOZONE, T.SINDTAX, T.SINDPOLICY,
+               T.SINDCLIENT, 1 NCURRENCY, MAX(R.DEFFECDATE) DEFFECDATE, T.NLINE
+          FROM RESERVE_GEN_DET R, TAB_SUNSYSTEMPGCE T
+         WHERE R.NBRANCH = NBRANCH_P
+           AND R.NPRODUCT = NPRODUCT_P
+           AND R.NPOLICY = NPOLICY_P
+           AND TO_CHAR (R.NYEAR) || RIGHT ('00' || TO_CHAR (R.NMONTH), 2) <=
+                                                                C_ENDYEARMONTH
+           AND (TO_CHAR (R.NYEAR) || RIGHT ('00' || TO_CHAR (R.NMONTH), 2) >=
+                                                                C_INIYEARMONTH
+               )
+           AND T.NRECTYPE = 2                               -- RESERVA TECNICA
+      GROUP BY NTYPE, T.SDESCRIPT,
+               T.SINDBRANCH_LED, T.SFECU, T.SPGCE, T.SACCOUNT,
+               T.SDESC_ACCOUNT, T.STYPACCOUNT, T.SCOUNTRY, T.SINDCENTERCOST,
+               T.SINDCASHFLOW, T.SINDGEOZONE, T.SINDTAX, T.SINDPOLICY,
+               T.SINDCLIENT,T.NLINE;
+
+/*-CURSOR PARA LA BUSQUEDA DE LOS REGISTROS CON LOS QUE REALIZAR EL ASIENTO CONTABLE*/
+   CURSOR C_TAB_SUNSYSTEM (C_NRECTYPE TAB_SUNSYSTEMPGCE.NRECTYPE%TYPE)
+   IS
+      SELECT T.SDESCRIPT, T.SINDBRANCH_LED, T.SFECU, T.SPGCE, T.SACCOUNT,
+             T.SDESC_ACCOUNT, T.STYPACCOUNT, T.SCOUNTRY, T.SINDCENTERCOST,
+             T.SINDCASHFLOW, T.SINDGEOZONE, T.SINDTAX, T.SINDPOLICY,
+             T.SINDCLIENT, T.NLINE, T.SROUTINE
+        FROM TAB_SUNSYSTEMPGCE T
+       WHERE T.NRECTYPE = C_NRECTYPE
+         AND SSTATREGT  = 1;
+
+/*- SE BUSCAN LOS SINIESTROS DIRECTOS */
+   CURSOR C_CUR_CLAIM_DIR (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCOVER_P     COVER.NCOVER%TYPE
+   )
+   IS
+      SELECT CM.NCLAIM, CM.SSTACLAIM, CH.NOPER_TYPE, CH.NCURRENCY, CL.NAMOUNT,
+             CP.SREGSVS, CES.NNUMBER, CT.NTYPE, CM.DDECLADAT DEFFECDATE
+        FROM CLAIM CM,
+             CL_M_COVER CL,
+             CLAIM_HIS CH,
+             CLAIM_CASE CC,
+             CLAIM_CES CES,
+             COMPANY CP,
+             CONTRPROC CT
+       WHERE CM.NCLAIM = CC.NCLAIM
+         AND CC.NCLAIM = CH.NCLAIM
+         AND CC.NCASE_NUM = CH.NCASE_NUM
+         AND CC.NDEMAN_TYPE = CH.NDEMAN_TYPE
+         AND CM.SCERTYPE = SCERTYPE_P
+         AND CM.NPOLICY = NPOLICY_P
+         --AND CM.NCERTIF      = NCERTIF_P
+         AND CL.NCLAIM = CH.NCLAIM
+         AND CL.NCASE_NUM = CH.NCASE_NUM
+         AND CL.NDEMAN_TYPE = CH.NDEMAN_TYPE
+         AND CL.NCOVER = NCOVER_P
+         AND CL.NCURRENCY = CH.NCURRENCY
+         AND CL.NTRANSAC = CH.NTRANSAC
+         AND CES.NCLAIM = CL.NCLAIM
+         AND CES.NCASE_NUM = CL.NCASE_NUM
+         AND CES.NDEMAN_TYPE = CL.NDEMAN_TYPE
+         AND CP.NCOMPANY = CES.NCOMPANY
+         AND CES.NNUMBER = CT.NNUMBER
+         AND CES.NTYPE IN (1, 3, 5);
+
+/*- SE BUSCAN LOS SINIESTROS CEDIDOS */
+   CURSOR C_CUR_CLAIM_CES (
+      SCERTYPE_P   CERTIFICAT.SCERTYPE%TYPE,
+      NPOLICY_P    CERTIFICAT.NPOLICY%TYPE,
+      NCOVER_P     COVER.NCOVER%TYPE
+   )
+   IS
+      SELECT CM.NCLAIM, CM.SSTACLAIM, CC.NCED_AMNT, CC.NNUMBER, CC.NTYPE,
+             CC.NCURRENCY, CC.NBRANCH_LED, CO.SREGSVS, CO.SNATIONAL,
+             CM.DDECLADAT DEFFECDATE
+        FROM CLAIM CM, CLAIM_CES CC, COMPANY CO
+       WHERE CM.NCLAIM = CC.NCLAIM
+         AND CM.SCERTYPE = SCERTYPE_P
+         AND CM.NPOLICY = NPOLICY_P
+         AND CC.NCLAIM = CM.NCLAIM
+         AND CC.NCOVER = NCOVER_P
+         AND CO.NCOMPANY = CC.NCOMPANY;
+
+/* PROCEDIMIENTO PARA CREAR LOS REGISTROS ENLA TABLA TEMPORAL DEL PROCESO */
+   PROCEDURE CRETMP_GIL9000 
+/*--------------------------------------------------------------------------------------*/
+/* NOMBRE    : CRETMP_GIL9000                                                           */
+/* OBJETIVO  : CREAR EL REGISTRO EN LA TABLA TEMPORAL DEL PROCESO DE INTERFAZ           */
+/*--------------------------------------------------------------------------------------*/
+   (
+      SKEY          TMP_GIL9000.SKEY%TYPE,
+      NRECTYPE      TMP_GIL9000.NRECTYPE%TYPE,
+      NBRANCH_LED   TMP_GIL9000.NBRANCH_LED%TYPE,
+      SFECU         TMP_GIL9000.SFECU%TYPE,
+      SPGCE         TMP_GIL9000.SPGCE%TYPE,
+      SACCOUNT      TMP_GIL9000.SACCOUNT%TYPE,
+      SDESCRIPT     TMP_GIL9000.SDESCRIPT%TYPE,
+      STYPACCOUNT   TMP_GIL9000.STYPACCOUNT%TYPE,
+      NAMOUNT       TMP_GIL9000.NAMOUNT%TYPE,
+      SCOUNTRY      TMP_GIL9000.SCOUNTRY%TYPE,
+      SCENTERCOST   TMP_GIL9000.SCENTERCOST%TYPE,
+      SCASHFLOW     TMP_GIL9000.SCASHFLOW%TYPE,
+      SGEOZONE      TMP_GIL9000.SGEOZONE%TYPE,
+      NTAX          TMP_GIL9000.NTAX%TYPE,
+      NPOLICY       TMP_GIL9000.NPOLICY%TYPE,
+      SCLIENT       TMP_GIL9000.SCLIENT%TYPE,
+      NCURRENCY     TABLE11.NCODIGINT%TYPE,
+      DEFFECDATE    DATE ,
+      NLINE         TMP_GIL9000.NLINE%TYPE    
+   ) AS
+   
+   SCURRENCY     TMP_GIL9000.SCURRENCY%TYPE;
+   SPERIOD       TMP_GIL9000.SPERIOD%TYPE;
+   SEFFECDATE    TMP_GIL9000.SEFFECDATE%TYPE;
+   
+   
+   BEGIN
+       SEFFECDATE := TO_CHAR(DEFFECDATE,'YYYYMMDD');
+       SPERIOD    := LEFT ('0'  || TO_CHAR(DEFFECDATE, 'MMYYYY') ,7) ; 
+
+       BEGIN
+           SELECT DECODE (NCODIGINT,1, 'CLP', 2, 'USD',  9, 'EUR', 4, 'UF', SSHORT_DES)
+             INTO SCURRENCY
+             FROM TABLE11
+            WHERE NCODIGINT = NCURRENCY ;
+            
+        EXCEPTION 
+            WHEN OTHERS THEN
+                SCURRENCY := 'CLP';
+       END;
+         
+      INSERT INTO TMP_GIL9000
+                  (SKEY, NRECTYPE,
+                   NBRANCH_LED, SFECU,
+                   SPGCE, SACCOUNT,
+                   SDESCRIPT, STYPACCOUNT,
+                   NAMOUNT, SCOUNTRY,
+                   SCENTERCOST, SCASHFLOW,
+                   SGEOZONE, NTAX,
+                   NPOLICY, SCLIENT, SCURRENCY,
+                   SEFFECDATE, SPERIOD, NLINE
+                  )
+           VALUES (NVL (SKEY, NULL), NVL (NRECTYPE, NULL),
+                   NVL (NBRANCH_LED, NULL), NVL (SFECU, NULL),
+                   NVL (SPGCE, NULL), NVL (SACCOUNT, NULL),
+                   NVL (SDESCRIPT, NULL), NVL (STYPACCOUNT, NULL),
+                   NVL (NAMOUNT, NULL), NVL (SCOUNTRY, NULL),
+                   NVL (SCENTERCOST, NULL), NVL (SCASHFLOW, NULL),
+                   NVL (SGEOZONE, NULL), NVL (NTAX, NULL),
+                   NVL (NPOLICY, NULL), NVL (SCLIENT, NULL), NVL(SCURRENCY , NULL),
+                   NVL(SEFFECDATE,NULL), NVL(SPERIOD,NULL), NLINE);
+   END CRETMP_GIL9000;
+
+/* PROCEDIMIENTO PARA BUSCAR EL RUT Y NOMBRE DEL CLIENTE POR ROL */
+   PROCEDURE FIND_ROLE 
+/*--------------------------------------------------------------------------------------*/
+/* NOMBRE    : FIND_ROLE                                                                */
+/* OBJETIVO  : BUSCA EL RUT Y NOMBRE DEL CLIENTE POR ROL                                */
+/*--------------------------------------------------------------------------------------*/
+   (
+      SCERTYPE              CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH               CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT              CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY               CERTIFICAT.NPOLICY%TYPE,
+      NCERTIF               CERTIFICAT.NCERTIF%TYPE,
+      DSTARTDATE            CERTIFICAT.DSTARTDATE%TYPE,
+      NROLE                 ROLES.NROLE%TYPE,
+      SCLIENT_OUT     OUT   CLIENT.SCLIENT%TYPE,
+      SCLIENAME_OUT   OUT   CLIENT.SCLIENAME%TYPE
+   )
+   AS
+/*- CURSOR PARA OBTENER LOS DATOS DEL ROL */
+      CURSOR C_CLIENT
+      IS
+         SELECT CL.SCLIENT, CL.SCLIENAME, CL.SFIRSTNAME, CL.SLASTNAME,
+                CL.SLEGALNAME, CL.SLASTNAME2, CL.NPERSON_TYP
+           FROM ROLES ROL, CLIENT CL
+          WHERE ROL.SCERTYPE = FIND_ROLE.SCERTYPE
+            AND ROL.NBRANCH = FIND_ROLE.NBRANCH
+            AND ROL.NPRODUCT = FIND_ROLE.NPRODUCT
+            AND ROL.NPOLICY = FIND_ROLE.NPOLICY
+            AND ROL.NROLE = FIND_ROLE.NROLE
+            AND ROL.DEFFECDATE <= FIND_ROLE.DSTARTDATE
+            AND (ROL.DNULLDATE > FIND_ROLE.DSTARTDATE OR ROL.DNULLDATE IS NULL
+                )
+            AND CL.SCLIENT = ROL.SCLIENT;
+
+      R_CLIENT   C_CLIENT%ROWTYPE;
+   BEGIN
+      OPEN C_CLIENT;
+
+      FETCH C_CLIENT
+       INTO R_CLIENT;
+
+      CLOSE C_CLIENT;
+
+/*+ SI EL CLIENTE EXISTE SE LLENA LA VARIABLE DEL NOMBRE DEL CLIENTE */
+      IF R_CLIENT.NPERSON_TYP = 1 THEN
+/*+ SE ASIGNA EL RUT Y EL NOMBRE DEL ROL */
+         SCLIENT_OUT := R_CLIENT.SCLIENT;
+         SCLIENAME_OUT := R_CLIENT.SCLIENAME;
+      ELSE
+/*+ SE ASIGNA EL RUT Y EL NOMBRE DEL ROL */
+         SCLIENT_OUT := R_CLIENT.SCLIENT;
+         SCLIENAME_OUT := R_CLIENT.SLEGALNAME;
+      END IF;
+
+      IF SCLIENT_OUT IS NOT NULL AND SCLIENAME_OUT IS NULL THEN
+         SCLIENAME_OUT :=
+               R_CLIENT.SFIRSTNAME
+            || ' '
+            || R_CLIENT.SLASTNAME
+            || ' '
+            || R_CLIENT.SLASTNAME2;
+      END IF;
+   END FIND_ROLE;
+
+/* PROCEDIMIENTO PARA CREAR EL BLOQUE DE GASTOS DE COBRANZA */
+   PROCEDURE CREGAST_COB 
+/*--------------------------------------------------------------------------------------*/
+/* NOMBRE    : CREGAST_COB                                                              */
+/* OBJETIVO  : CREA EL BLOQUE DE GASTOS DE COBRANZA                                     */
+/*--------------------------------------------------------------------------------------*/
+   (  SCERTYPE       CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH        CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT       CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY        CERTIFICAT.NPOLICY%TYPE,
+      NOFFICE        POLICY.NOFFICE%TYPE,
+      DPOLICYSTART   DATE,
+      DPOLICYEXPIR   DATE,
+      DDATEORIGI     CERTIFICAT.DDATE_ORIGI%TYPE,
+      NPAYFREQ       CERTIFICAT.NPAYFREQ%TYPE,
+      NCOVER         COVER.NCOVER%TYPE) AS
+      NPORC_REC_REM   NUMBER (5, 2);
+      NPERC_REC       NUMBER (5, 2);
+      NPREMIUM_PRE    PREMIUM.NPREMIUM%TYPE;
+      NBALANCE_PRE    PREMIUM.NPREMIUM%TYPE;
+      NPREMIUM_DET    PREMIUM.NPREMIUM%TYPE;
+      NPREMIUM_REC    PREMIUM.NPREMIUM%TYPE;
+      NPREMIUM_DEV    PREMIUM.NPREMIUM%TYPE;
+      NCOVER_BAS      LIFE_COVER.NCOVER%TYPE;
+   BEGIN
+/*+ SE BUSCA LA SUMA DEL PORCENTAJE DE REMARQUE */
+      BEGIN
+         SELECT ROUND (SUM ((D.NPREMIUM * 100) / P.NPREMIUM), 2)
+           INTO NPORC_REC_REM
+           FROM PREMIUM P, DETAIL_PRE D
+          WHERE P.SCERTYPE = CREGAST_COB.SCERTYPE
+            AND P.NBRANCH = CREGAST_COB.NBRANCH
+            AND P.NPRODUCT = CREGAST_COB.NPRODUCT
+            AND P.NPOLICY = CREGAST_COB.NPOLICY
+            AND D.NRECEIPT = P.NRECEIPT
+            AND D.STYPE_DETAI = 7;
+      EXCEPTION
+         WHEN OTHERS THEN
+            NPORC_REC_REM := 0;
+      END;
+
+/*+ OBTINE LAS PRIMAS RECAUDADAS EN EL MES DEL PROCESO /*/
+      BEGIN
+         SELECT SUM (P.NPREMIUM), SUM (P.NBALANCE), SUM (D.NPREMIUM)
+           INTO NPREMIUM_PRE, NBALANCE_PRE, NPREMIUM_DET
+           FROM PREMIUM P, DETAIL_PRE D, PREMIUM_MO M
+          WHERE P.SCERTYPE = CREGAST_COB.SCERTYPE
+            AND P.NBRANCH = CREGAST_COB.NBRANCH
+            AND P.NPRODUCT = CREGAST_COB.NPRODUCT
+            AND P.NPOLICY = CREGAST_COB.NPOLICY
+            AND D.NRECEIPT = P.NRECEIPT
+            AND D.STYPE_DETAI <> 7
+            AND D.NDET_CODE = CREGAST_COB.NCOVER
+            AND M.SCERTYPE = P.SCERTYPE
+            AND M.NPRODUCT = P.NPRODUCT
+            AND M.NBRANCH = P.NBRANCH
+            AND M.NRECEIPT = P.NRECEIPT
+            AND M.NDIGIT = P.NDIGIT
+            AND M.NPAYNUMBE = P.NPAYNUMBE
+            AND M.DLEDGERDAT BETWEEN INSPOSTGIL9001.DSTARTDATE
+                                 AND INSPOSTGIL9001.DEND_DATE;
+      EXCEPTION
+         WHEN OTHERS THEN
+            NPREMIUM_PRE := 0;
+            NBALANCE_PRE := 0;
+            NPREMIUM_DET := 0;
+      END;
+
+      /*   COBERTURA PRINCIPAL */
+      BEGIN
+         SELECT NCOVER
+           INTO NCOVER_BAS
+           FROM LIFE_COVER
+          WHERE NPRODUCT = CREGAST_COB.NPRODUCT AND SCOVERUSE IS NOT NULL;
+      EXCEPTION
+         WHEN OTHERS THEN
+            NCOVER_BAS := NULL;
+      END;
+
+/*+ OBTIENE EL PORCENTAJE DEL MONTO DE LA COBERTURA */
+      NPERC_REC := ROUND ((NPREMIUM_DET * 100) / NPREMIUM_PRE, 2);
+/*+ EL MONTO DE REMARQUE DE LA PRIMA RECAUDADA */
+      NPREMIUM_REC :=
+                  ROUND (((NPREMIUM_PRE - NBALANCE_PRE) * NPERC_REC) / 100, 6);
+/*+ EL MONTO DE REMARQUE DE LA PRIMA DEVENGADA */
+      NPREMIUM_DEV := ROUND ((NBALANCE_PRE * NPERC_REC) / 100, 6);
+/*+ SE INSERTA EL GASTOS DE COBRANZA */
+/*
+    CRETMP_GIL9001 (SKEY             => INSPOSTGIL9001.SKEY,
+                    NRECTYPE         => 7, -- GASTOS DE COBRANZA
+                    NPOLICY          => CREGAST_COB.NPOLICY,
+                    NOFFICE          => CREGAST_COB.NOFFICE,
+                    DPOLICYSTART     => CREGAST_COB.DPOLICYSTART,
+                    DPOLICYEXPIR     => CREGAST_COB.DPOLICYEXPIR,
+                    DDATEORIGI       => CREGAST_COB.DDATEORIGI,
+                    SCLIENT          => SCLIENT_CON,
+                    SCLIENTNAME      => SCLIENAME_CON,
+                    NPAYFREQ         => CREGAST_COB.NPAYFREQ,
+                    NCURRENCY        => NCURRENCY_INT,
+                    NCURRENCY_M      => NCURRENCY_INT,
+                    DEFFECDATE       => DEFFECDATE_INT,
+                    SREPCLIENT       => SCLIENT_COMERCIAL,
+                    SREPNAME         => SCLIENAME_COMERCIAL,
+                    NREPOFFICE       => CREGAST_COB.NOFFICE,
+                    SINTERCLIENT     => SINTERCLIENT_AUX,
+                    SINTERNAME       => SINTERNAME_AUX,
+                    NITERTYPE        => NINTERTYPE_AUX,
+                    NCOLLREPCLIENT   => 0, -- CODIGO INTERMEDIARIO GTOS COBRANZA
+                    NBRANCHLED       => NBRANCHLED_INT,
+                    SPERIOD          => SPERIOD_INT,
+                    NEXPENSEPERCENT  => NPORC_REC_REM,
+                    NEXPENSEAMNT_REC => NPREMIUM_REC,
+                    NEXPENSEAMNT_DEV => NPREMIUM_DEV,
+                    NCOVER           => NCOVER_BAS);
+*/
+   END CREGAST_COB;
+BEGIN
+/*SE VERIFICA NBRANCH (RAMO) */
+   NCOUNT := 0;
+
+   IF INSPOSTGIL9001.NBRANCH <> 0 THEN
+      BEGIN
+         SELECT 1
+           INTO NCOUNT
+           FROM TABLE10 T
+          WHERE T.NBRANCH = INSPOSTGIL9001.NBRANCH AND T.SSTATREGT = 1;
+      EXCEPTION
+         WHEN OTHERS THEN
+            NCOUNT := 0;
+      END;
+
+      IF NCOUNT = 0 THEN
+         NERROR := 750104;
+         SERRORDESC := 'RAMO: ';
+         RETURN;
+      END IF;
+   END IF;
+
+/*+  PARA VALIDAR EL PRODCUCTO SE DEBE VALIDAR PRIMERO QUE EL RAMO EXISTA */
+   IF (INSPOSTGIL9001.NPRODUCT IS NOT NULL AND INSPOSTGIL9001.NBRANCH = 0) THEN
+      NERROR := 70137;
+      SERRORDESC := 'PRODUCTO: ';
+      RETURN;
+   END IF;
+
+/* SE VERIFICA PRODUCTO (PRODUCTO) */
+   NCOUNT := 0;
+
+   IF INSPOSTGIL9001.NPRODUCT IS NOT NULL THEN
+      BEGIN
+         SELECT 1, SBRANCHT
+           INTO NCOUNT, SBRANCHT
+           FROM PRODMASTER P
+          WHERE P.NBRANCH = INSPOSTGIL9001.NBRANCH
+            AND P.NPRODUCT = INSPOSTGIL9001.NPRODUCT
+            AND P.SSTATREGT = 1;
+      EXCEPTION
+         WHEN OTHERS THEN
+            NCOUNT := 0;
+      END;
+
+      IF NCOUNT = 0 THEN
+         NERROR := 750104;
+         SERRORDESC := 'PRODUCTO: ';
+         RETURN;
+      END IF;
+   END IF;
+
+   BEGIN
+      NPOLICY_AUX := 0;
+
+      FOR R_CUR_PRINC IN C_CUR_PRINC LOOP
+CRETRACE2('INSPOSTGIL9001', 8586, 'POLIZA' || TO_CHAR(R_CUR_PRINC.NPOLICY));
+         IF NPOLICY_AUX <> R_CUR_PRINC.NPOLICY THEN
+            SELECT POL.NOFFICE, POL.DSTARTDATE, POL.DEXPIRDAT,
+                   POL.DDATE_ORIGI, POL.NPAYFREQ, POL.NCAPITAL
+              INTO NOFFICE_POL, DSTARTDATE_POL, DEXPIRDAT_POL,
+                   DDATE_ORIGI_POL, NPAYFREQ_POL, NCAPITAL_POL
+              FROM POLICY POL
+             WHERE SCERTYPE = R_CUR_PRINC.SCERTYPE
+               AND NBRANCH  = R_CUR_PRINC.NBRANCH
+               AND NPRODUCT = R_CUR_PRINC.NPRODUCT
+               AND NPOLICY  = R_CUR_PRINC.NPOLICY;
+               
+
+/*+ SE LLENAN LOS VALORES PARA LA RESERVA GENERALES POR POLIZA */
+            FOR R_CUR_RESERVE_GEN IN
+               C_CUR_RESERVE_GEN (R_CUR_PRINC.NBRANCH,
+                                  R_CUR_PRINC.NPRODUCT,
+                                  R_CUR_PRINC.NPOLICY,
+                                     TO_CHAR (DSTARTDATE)
+                                  || RIGHT ('00' || TO_CHAR (DSTARTDATE), 2),
+                                     TO_CHAR (DEND_DATE)
+                                  || RIGHT ('00' || TO_CHAR (DEND_DATE), 2)
+                                 ) LOOP
+               SELECT DECODE (R_CUR_RESERVE_GEN.SINDBRANCH_LED,
+                              '1', NBRANCHLED_INT,
+                              NULL
+                             ),
+                      DECODE (R_CUR_RESERVE_GEN.SINDPOLICY,
+                              '1', R_CUR_PRINC.NPOLICY,
+                              NULL
+                             ),
+                      DECODE (R_CUR_RESERVE_GEN.SINDCLIENT,
+                              '1', SCLIENT_CON,
+                              NULL
+                             )
+                 INTO T_NBRANCH_LED,
+                      T_NPOLICY,
+                      T_SCLIENT
+                 FROM DUAL;
+
+                 /*
+               T_SCENTERCOST
+               T_SCASHFLOW
+               T_SGEOZONE
+               T_NTAX
+                         */
+               CRETMP_GIL9000 (SKEY             => INSPOSTGIL9001.SKEY,
+                               NRECTYPE         => 2,       -- RESERVA TÉCNICA
+                               NBRANCH_LED      => T_NBRANCH_LED,
+                               SFECU            => R_CUR_RESERVE_GEN.SFECU,
+                               SPGCE            => R_CUR_RESERVE_GEN.SPGCE,
+                               SACCOUNT         => R_CUR_RESERVE_GEN.SACCOUNT,
+                               SDESCRIPT        => R_CUR_RESERVE_GEN.SDESCRIPT,
+                               STYPACCOUNT      => R_CUR_RESERVE_GEN.STYPACCOUNT,
+                               NAMOUNT          => R_CUR_RESERVE_GEN.NRESERVE,
+                               SCOUNTRY         => R_CUR_RESERVE_GEN.SCOUNTRY,
+                               SCENTERCOST      => T_SCENTERCOST,
+                               SCASHFLOW        => T_SCASHFLOW,
+                               SGEOZONE         => T_SGEOZONE,
+                               NTAX             => T_NTAX,
+                               NPOLICY          => R_CUR_PRINC.NPOLICY,
+                               SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                               NCURRENCY        => R_CUR_RESERVE_GEN.NCURRENCY,
+                               DEFFECDATE       => R_CUR_RESERVE_GEN.DEFFECDATE,
+                               NLINE            => R_CUR_RESERVE_GEN.NLINE);
+            END LOOP;
+         END IF;
+
+/*+ SEGUN EL TIPO DE RECIBOS 1 = POR POLIZA */
+         IF R_CUR_PRINC.SCOLINVOT = '1' THEN
+/*+ BUSCA EL RUT Y NOMBRE DEL ROL */
+/*+ 1 = CONTRATANTE */
+            FIND_ROLE (SCERTYPE           => R_CUR_PRINC.SCERTYPE,
+                       NBRANCH            => R_CUR_PRINC.NBRANCH,
+                       NPRODUCT           => R_CUR_PRINC.NPRODUCT,
+                       NPOLICY            => R_CUR_PRINC.NPOLICY,
+                       NCERTIF            => 0,
+                       DSTARTDATE         => INSPOSTGIL9001.DSTARTDATE,
+                       NROLE              => 1,                     -- TABLE12
+                       SCLIENT_OUT        => SCLIENT_CON,
+                       SCLIENAME_OUT      => SCLIENAME_CON
+                      );
+/*+ 13 = INTERMEDIARIO */
+            FIND_ROLE (SCERTYPE           => R_CUR_PRINC.SCERTYPE,
+                       NBRANCH            => R_CUR_PRINC.NBRANCH,
+                       NPRODUCT           => R_CUR_PRINC.NPRODUCT,
+                       NPOLICY            => R_CUR_PRINC.NPOLICY,
+                       NCERTIF            => 0,
+                       DSTARTDATE         => INSPOSTGIL9001.DSTARTDATE,
+                       NROLE              => 13,
+                       SCLIENT_OUT        => SINTERCLIENT_AUX,
+                       SCLIENAME_OUT      => SINTERNAME_AUX
+                      );
+
+/*+ SE BUSCA EL TIPO DE INTERMEDIARIO */
+            BEGIN
+               SELECT I.NINTERTYP NINTERTYPE
+                 INTO NINTERTYPE_AUX
+                 FROM ROLES R, INTERMEDIA I
+                WHERE R.SCERTYPE = R_CUR_PRINC.SCERTYPE
+                  AND R.NBRANCH = R_CUR_PRINC.NBRANCH
+                  AND R.NPRODUCT = R_CUR_PRINC.NPRODUCT
+                  AND R.NPOLICY = R_CUR_PRINC.NPOLICY
+                  AND R.NCERTIF = 0
+                  AND R.NROLE = 13
+                  AND R.DEFFECDATE <= INSPOSTGIL9001.DSTARTDATE
+                  AND (   R.DNULLDATE IS NULL
+                       OR R.DNULLDATE > INSPOSTGIL9001.DSTARTDATE
+                      )
+                  AND I.NINTERMED = R.NINTERMED;
+            EXCEPTION
+               WHEN NO_DATA_FOUND THEN
+                  NINTERTYPE_AUX := NULL;
+               WHEN OTHERS THEN
+                  RAISE;
+            END;
+
+/*+ 65 = EJECUTIVO COMERCIAL */
+            FIND_ROLE (SCERTYPE           => R_CUR_PRINC.SCERTYPE,
+                       NBRANCH            => R_CUR_PRINC.NBRANCH,
+                       NPRODUCT           => R_CUR_PRINC.NPRODUCT,
+                       NPOLICY            => R_CUR_PRINC.NPOLICY,
+                       NCERTIF            => 0,
+                       DSTARTDATE         => INSPOSTGIL9001.DSTARTDATE,
+                       NROLE              => 65,
+                       SCLIENT_OUT        => SCLIENT_COMERCIAL,
+                       SCLIENAME_OUT      => SCLIENAME_COMERCIAL
+                      );
+
+/*+ SE HACE LA BUSQUEDA DE LOS DATOS DEL EJECUTIVO COMERCIAL */
+            BEGIN
+               NSUCURSAL_COMERCIAL := NULL;
+
+               SELECT CL.NOFFICE
+                 INTO NSUCURSAL_COMERCIAL
+                 FROM CLIENT CL
+                WHERE CL.SCLIENT = SCLIENT_COMERCIAL;
+            EXCEPTION
+               WHEN NO_DATA_FOUND THEN
+                  NSUCURSAL_COMERCIAL := NULL;
+               WHEN OTHERS THEN
+                  RAISE;
+            END;
+
+/*+ BUSQUEDA DE LA PRIMA DIRECTA */
+            FOR R_CUR_DETAIL_PRE IN C_CUR_DETAIL_PRE (R_CUR_PRINC.SCERTYPE,
+                                                      R_CUR_PRINC.NBRANCH,
+                                                      R_CUR_PRINC.NPRODUCT,
+                                                      R_CUR_PRINC.NPOLICY,
+                                                      R_CUR_PRINC.NCOVER) LOOP
+/*+ SE ASIGNA LA MONEDA Y LA FECHA DEL MOVIMIENTO A VARIABLES DE TODO EL PROCESO */
+               NCURRENCY_INT := R_CUR_DETAIL_PRE.NCURRENCY_M;
+               --DEFFECDATE_INT := R_CUR_DETAIL_PRE.DEFFECDATE;
+               SPERIOD_INT := TO_CHAR (INSPOSTGIL9001.DSTARTDATE, 'YYYYMM');
+               NBRANCHLED_INT := R_CUR_DETAIL_PRE.NBRANCH_LED;
+
+               BEGIN
+/*+ CREA EL REGISTRO EN LA TABLA TEMPORAL DEL PROCESO DE INTERFAZ */
+                  FOR R_TAB_SUNSYSTEM IN C_TAB_SUNSYSTEM (5) LOOP                                                --PRIMA
+                     SELECT DECODE (R_TAB_SUNSYSTEM.SINDBRANCH_LED,
+                                    '1', NBRANCHLED_INT,
+                                    NULL
+                                   ),
+                            DECODE (R_TAB_SUNSYSTEM.SINDPOLICY,
+                                    '1', R_CUR_PRINC.NPOLICY,
+                                    NULL
+                                   ),
+                            DECODE (R_TAB_SUNSYSTEM.SINDCLIENT,
+                                    '1', SCLIENT_CON,
+                                    NULL
+                                   )
+                       INTO T_NBRANCH_LED,
+                            T_NPOLICY,
+                            T_SCLIENT
+                       FROM DUAL;
+
+                       /*
+                     T_SCENTERCOST
+                     T_SCASHFLOW
+                     T_SGEOZONE
+                     T_NTAX
+                               */
+                     IF  R_TAB_SUNSYSTEM.SPGCE IN (400) THEN
+                        R_TAB_SUNSYSTEM.SACCOUNT := 'PE' || SCLIENT_CON;
+                     ELSIF R_TAB_SUNSYSTEM.SPGCE IN (440) THEN
+                        R_TAB_SUNSYSTEM.SACCOUNT := 'C' || SCLIENT_CON;
+                     ELSIF R_TAB_SUNSYSTEM.SPGCE IN (4331) THEN
+                        R_TAB_SUNSYSTEM.SACCOUNT := 'PF' || SCLIENT_CON;                        
+                     ELSE
+                        R_TAB_SUNSYSTEM.SACCOUNT := NVL(R_TAB_SUNSYSTEM.SACCOUNT,'PE' || SCLIENT_CON); 
+                     END IF;
+                     
+                     NAMOUNT := R_CUR_DETAIL_PRE.NPREMIUM;
+
+                     IF  R_TAB_SUNSYSTEM.SROUTINE = 'COMISI' THEN
+                        NAMOUNT := R_CUR_DETAIL_PRE.NCOMMISION;
+                        SCLIENT_CON := REAGENERALPKG.REACLIENTINTERMED(R_CUR_DETAIL_PRE.NINTERMED);
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'IVA' THEN
+                        NAMOUNT := R_CUR_DETAIL_PRE.NPREMIUMVAT;
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'PREM_INT' THEN
+                        IF R_CUR_DETAIL_PRE.NCOMMISION = 0 THEN
+                            NAMOUNT := 0;
+                        END IF; 
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'PREM_DT' THEN
+                        IF R_CUR_DETAIL_PRE.NCOMMISION > 0 THEN
+                            NAMOUNT := 0;
+                        END IF; 
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'TOT_PREM_INT' THEN
+                        IF R_CUR_DETAIL_PRE.NCOMMISION > 0 THEN
+                            NAMOUNT := R_CUR_DETAIL_PRE.NPREMIUMB ;
+                        ELSE
+                            NAMOUNT := 0;
+                        END IF; 
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'TOT_PREM' THEN
+                        IF R_CUR_DETAIL_PRE.NCOMMISION = 0 THEN
+                            NAMOUNT := R_CUR_DETAIL_PRE.NPREMIUMB ;
+                        ELSE
+                            NAMOUNT := 0 ;                           
+                        END IF;  
+                     ELSIF R_TAB_SUNSYSTEM.SROUTINE = 'RETENTION' OR  R_TAB_SUNSYSTEM.SROUTINE = 'RET_PERCENT' THEN   --TOTAL CEDIDO
+                        NAMOUNT := 0;
+                        BEGIN
+                            SELECT NSHARE , NNUMBER   --% CEDIDO 
+                              INTO NAMOUNT, NNUMBER
+                             FROM REINSURAN
+                             WHERE NTYPE_REIN  > 1
+                               AND SCERTYPE    = R_CUR_PRINC.SCERTYPE
+                               AND NBRANCH     = R_CUR_PRINC.NBRANCH
+                               AND NPRODUCT    = R_CUR_PRINC.NPRODUCT
+                               AND NPOLICY     = R_CUR_PRINC.NPOLICY
+                               AND NCERTIF     = 0
+                               AND DEFFECDATE <= R_CUR_DETAIL_PRE.DEFFECDATE
+                               AND (DNULLDATE IS NULL
+                                OR DNULLDATE   > R_CUR_DETAIL_PRE.DEFFECDATE);
+                                
+                            EXCEPTION 
+                                WHEN OTHERS THEN
+                                    NAMOUNT := 0;                                
+                        END;             
+                        IF NAMOUNT > 0 THEN
+                            NAMOUNT := (NAMOUNT/100) * R_CUR_DETAIL_PRE.NPREMIUM; --PRIMA CEDIDA TOTAL 
+                        END IF; 
+                        IF R_TAB_SUNSYSTEM.SROUTINE = 'RET_PERCENT' AND NAMOUNT > 0 THEN
+                            NAMOUNT := NAMOUNT * (2/100);
+                        END IF;     
+                     ELSE
+                        NAMOUNT := 0; 
+                     END IF;
+                                              --PREM_CES             PREM_CES_PERCENT
+                     IF NAMOUNT > 0 THEN
+                     
+                         CRETMP_GIL9000
+                                  (SKEY             => INSPOSTGIL9001.SKEY,
+                                   NRECTYPE         => 5,    -- RESERVA PRIMA PROD
+                                   NBRANCH_LED      => T_NBRANCH_LED,
+                                   SFECU            => R_TAB_SUNSYSTEM.SFECU,
+                                   SPGCE            => R_TAB_SUNSYSTEM.SPGCE,
+                                   SACCOUNT         => R_TAB_SUNSYSTEM.SACCOUNT,
+                                   SDESCRIPT        => R_TAB_SUNSYSTEM.SDESCRIPT,
+                                   STYPACCOUNT      => R_TAB_SUNSYSTEM.STYPACCOUNT,
+                                   NAMOUNT          => NAMOUNT,
+                                   SCOUNTRY         => R_TAB_SUNSYSTEM.SCOUNTRY,
+                                   SCENTERCOST      => T_SCENTERCOST,
+                                   SCASHFLOW        => T_SCASHFLOW,
+                                   SGEOZONE         => T_SGEOZONE,
+                                   NTAX             => T_NTAX,
+                                   NPOLICY          => R_CUR_PRINC.NPOLICY,
+                                   SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                                   NCURRENCY        => R_CUR_DETAIL_PRE.NCURRENCY,
+                                   DEFFECDATE       => R_CUR_DETAIL_PRE.DEFFECDATE,
+                                   NLINE            => R_TAB_SUNSYSTEM.NLINE);
+                    ELSE
+                    
+                        IF  R_TAB_SUNSYSTEM.SROUTINE = 'PREM_CES' OR R_TAB_SUNSYSTEM.SROUTINE = 'PREM_CES_PERCENT' THEN
+                            FOR R_CUR_REINSURAN IN C_CUR_REINSURAN(R_CUR_PRINC.SCERTYPE,
+                                                      R_CUR_PRINC.NBRANCH,
+                                                      R_CUR_PRINC.NPRODUCT,
+                                                      R_CUR_PRINC.NPOLICY) LOOP
+                                                      
+                                NAMOUNT := (NAMOUNT/100) * R_CUR_REINSURAN.NSHARE;
+                                IF R_TAB_SUNSYSTEM.SROUTINE = 'PREM_CES_PERCENT' AND NAMOUNT > 0 THEN
+                                    NAMOUNT := NAMOUNT * (2/100);
+                                END IF;     
+                                
+                                SCLIENT_CON := REAGENERALPKG.REACLIENTCOMPANY(R_CUR_REINSURAN.NCOMPANY);
+                                 IF NAMOUNT > 0 THEN
+                                     CRETMP_GIL9000
+                                              (SKEY             => INSPOSTGIL9001.SKEY,
+                                               NRECTYPE         => 5,    -- RESERVA PRIMA PROD
+                                               NBRANCH_LED      => T_NBRANCH_LED,
+                                               SFECU            => R_TAB_SUNSYSTEM.SFECU,
+                                               SPGCE            => R_TAB_SUNSYSTEM.SPGCE,
+                                               SACCOUNT         => R_TAB_SUNSYSTEM.SACCOUNT,
+                                               SDESCRIPT        => R_TAB_SUNSYSTEM.SDESCRIPT,
+                                               STYPACCOUNT      => R_TAB_SUNSYSTEM.STYPACCOUNT,
+                                               NAMOUNT          => NAMOUNT,
+                                               SCOUNTRY         => R_TAB_SUNSYSTEM.SCOUNTRY,
+                                               SCENTERCOST      => T_SCENTERCOST,
+                                               SCASHFLOW        => T_SCASHFLOW,
+                                               SGEOZONE         => T_SGEOZONE,
+                                               NTAX             => T_NTAX,
+                                               NPOLICY          => R_CUR_PRINC.NPOLICY,
+                                               SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                                               NCURRENCY        => R_CUR_DETAIL_PRE.NCURRENCY,
+                                               DEFFECDATE       => R_CUR_DETAIL_PRE.DEFFECDATE,
+                                               NLINE            => R_TAB_SUNSYSTEM.NLINE);
+                                END IF;                                                                                                                         
+                                                      
+                            END LOOP;                        
+                        END IF;
+                    END IF;
+                  END LOOP;
+               EXCEPTION
+                  WHEN OTHERS THEN
+                     NERROR := 1;
+                     SERRORDESC := 'ERROR: ' || SQLERRM;
+                     CRETRACE2 ('INSPOSTGIL9001',999,'ERROR_NRECTYPE = 5  : ' || SERRORDESC);
+               END;
+            END LOOP;
+
+/*+ BUSQUEDA DE LOS SINIESTROS DIRECTOS */
+            FOR R_CUR_CLAIM_DIR IN C_CUR_CLAIM_DIR (R_CUR_PRINC.SCERTYPE,
+                                                    R_CUR_PRINC.NPOLICY,
+                                                    R_CUR_PRINC.NCOVER) LOOP
+               SSTACLAIM_AUX := R_CUR_CLAIM_DIR.SSTACLAIM;
+
+               IF R_CUR_CLAIM_DIR.NOPER_TYPE = 1 THEN
+                  SSTACLAIM_AUX := 6;
+               END IF;
+
+               FOR R_TAB_SUNSYSTEM IN C_TAB_SUNSYSTEM (4) LOOP
+                  SELECT DECODE (R_TAB_SUNSYSTEM.SINDBRANCH_LED,
+                                 '1', NBRANCHLED_INT,
+                                 NULL
+                                ),
+                         DECODE (R_TAB_SUNSYSTEM.SINDPOLICY,
+                                 '1', R_CUR_PRINC.NPOLICY,
+                                 NULL
+                                ),
+                         DECODE (R_TAB_SUNSYSTEM.SINDCLIENT,
+                                 '1', SCLIENT_CON,
+                                 NULL
+                                )
+                    INTO T_NBRANCH_LED,
+                         T_NPOLICY,
+                         T_SCLIENT
+                    FROM DUAL;
+
+                    /*
+                  T_SCENTERCOST
+                  T_SCASHFLOW
+                  T_SGEOZONE
+                  T_NTAX
+                            */
+                  CRETMP_GIL9000 (SKEY             => INSPOSTGIL9001.SKEY,
+                                  NRECTYPE         => 4,
+                                                     -- RESERVA PROV SINIESTRO
+                                  NBRANCH_LED      => T_NBRANCH_LED,
+                                  SFECU            => R_TAB_SUNSYSTEM.SFECU,
+                                  SPGCE            => R_TAB_SUNSYSTEM.SPGCE,
+                                  SACCOUNT         => R_TAB_SUNSYSTEM.SACCOUNT,
+                                  SDESCRIPT        => R_TAB_SUNSYSTEM.SDESCRIPT,
+                                  STYPACCOUNT      => R_TAB_SUNSYSTEM.STYPACCOUNT,
+                                  NAMOUNT          => R_CUR_CLAIM_DIR.NAMOUNT,
+                                  SCOUNTRY         => R_TAB_SUNSYSTEM.SCOUNTRY,
+                                  SCENTERCOST      => T_SCENTERCOST,
+                                  SCASHFLOW        => T_SCASHFLOW,
+                                  SGEOZONE         => T_SGEOZONE,
+                                  NTAX             => T_NTAX,
+                                  NPOLICY          => R_CUR_PRINC.NPOLICY,
+                                  SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                                  NCURRENCY        => R_CUR_CLAIM_DIR.NCURRENCY,
+                                  DEFFECDATE       => R_CUR_CLAIM_DIR.DEFFECDATE,
+                                  NLINE            => R_TAB_SUNSYSTEM.NLINE
+                                 );
+               END LOOP;
+            END LOOP;
+
+/*+ EN CASO QUE SREINSURA=1 ENTONCES TIENE DISTRIBUCION DE REASEGURO Y SE BUSCA LA PRIMA CEDIDA */
+            IF R_CUR_PRINC.SREINSURA = '1' THEN
+/*+ SE REALIZA LA BUSQUEDA DE LA PRIMA CEDIDA */
+               FOR R_CUR_CESSION_PR IN
+                  C_CUR_CESSION_PR (R_CUR_PRINC.SCERTYPE,
+                                    R_CUR_PRINC.NBRANCH,
+                                    R_CUR_PRINC.NPRODUCT,
+                                    R_CUR_PRINC.NPOLICY,
+                                    R_CUR_PRINC.NCOVER) LOOP
+/*+ CREA EL REGISTRO EN LA TABLA TEMPORAL DEL PROCESO DE INTERFAZ */
+                  FOR R_TAB_SUNSYSTEM IN C_TAB_SUNSYSTEM (3) LOOP
+                     SELECT DECODE (R_TAB_SUNSYSTEM.SINDBRANCH_LED,
+                                    '1', NBRANCHLED_INT,
+                                    NULL
+                                   ),
+                            DECODE (R_TAB_SUNSYSTEM.SINDPOLICY,
+                                    '1', R_CUR_PRINC.NPOLICY,
+                                    NULL
+                                   ),
+                            DECODE (R_TAB_SUNSYSTEM.SINDCLIENT,
+                                    '1', SCLIENT_CON,
+                                    NULL
+                                   )
+                       INTO T_NBRANCH_LED,
+                            T_NPOLICY,
+                            T_SCLIENT
+                       FROM DUAL;
+
+                       /*
+                     T_SCENTERCOST
+                     T_SCASHFLOW
+                     T_SGEOZONE
+                     T_NTAX
+                               */
+                     CRETMP_GIL9000
+                                  (SKEY             => INSPOSTGIL9001.SKEY,
+                                   NRECTYPE         => 3,
+                                                         -- RESERVA PRIMA PROD
+                                   NBRANCH_LED      => T_NBRANCH_LED,
+                                   SFECU            => R_TAB_SUNSYSTEM.SFECU,
+                                   SPGCE            => R_TAB_SUNSYSTEM.SPGCE,
+                                   SACCOUNT         => R_TAB_SUNSYSTEM.SACCOUNT,
+                                   SDESCRIPT        => R_TAB_SUNSYSTEM.SDESCRIPT,
+                                   STYPACCOUNT      => R_TAB_SUNSYSTEM.STYPACCOUNT,
+                                   NAMOUNT          => R_CUR_CESSION_PR.NCESSPREM,
+                                   SCOUNTRY         => R_TAB_SUNSYSTEM.SCOUNTRY,
+                                   SCENTERCOST      => T_SCENTERCOST,
+                                   SCASHFLOW        => T_SCASHFLOW,
+                                   SGEOZONE         => T_SGEOZONE,
+                                   NTAX             => T_NTAX,
+                                   NPOLICY          => R_CUR_PRINC.NPOLICY,
+                                   SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                                   NCURRENCY        => R_CUR_CESSION_PR.NCURRENCY,
+                                   DEFFECDATE       => R_CUR_CESSION_PR.DEFFECDATE,
+                                   NLINE            => R_TAB_SUNSYSTEM.NLINE
+                                  );
+                  END LOOP;
+
+                  CRETRACE2 ('INSPOSTGIL9001', 999, 'NNUMBER  : ' || 'PRIMA CEDIDA');
+               END LOOP;
+
+/*+ SE REALIZA LA BUSQUEDA SINIESTRO CEDIDO */
+               FOR R_CUR_CLAIM_CES IN C_CUR_CLAIM_CES (R_CUR_PRINC.SCERTYPE,
+                                                       R_CUR_PRINC.NPOLICY,
+                                                       R_CUR_PRINC.NCOVER) LOOP
+                  CRETRACE2 ('INSPOSTGIL9001', 999, 'NNUMBER  : ' || 'SINIESTRO CEDIDO ');
+
+/*+ SE INSERTA LA SINIESTRO CEDIDO */
+                  FOR R_TAB_SUNSYSTEM IN C_TAB_SUNSYSTEM (3) LOOP
+                     SELECT DECODE (R_TAB_SUNSYSTEM.SINDBRANCH_LED,
+                                    '1', NBRANCHLED_INT,
+                                    NULL),
+                            DECODE (R_TAB_SUNSYSTEM.SINDPOLICY,
+                                    '1', R_CUR_PRINC.NPOLICY,
+                                    NULL),
+                            DECODE (R_TAB_SUNSYSTEM.SINDCLIENT,
+                                    '1', SCLIENT_CON,
+                                    NULL)
+                       INTO T_NBRANCH_LED,
+                            T_NPOLICY,
+                            T_SCLIENT
+                       FROM DUAL;
+
+                       /*
+                     T_SCENTERCOST
+                     T_SCASHFLOW
+                     T_SGEOZONE
+                     T_NTAX
+                               */
+                     CRETMP_GIL9000 (SKEY             => INSPOSTGIL9001.SKEY,
+                                    NRECTYPE         => 3, -- RESERVA PRIMA PROD
+                                    NBRANCH_LED      => T_NBRANCH_LED,
+                                    SFECU            => R_TAB_SUNSYSTEM.SFECU,
+                                    SPGCE            => R_TAB_SUNSYSTEM.SPGCE,
+                                    SACCOUNT         => R_TAB_SUNSYSTEM.SACCOUNT,
+                                    SDESCRIPT        => R_TAB_SUNSYSTEM.SDESCRIPT,
+                                    STYPACCOUNT      => R_TAB_SUNSYSTEM.STYPACCOUNT,
+                                    NAMOUNT          => R_CUR_CLAIM_CES.NCED_AMNT,
+                                    SCOUNTRY         => R_TAB_SUNSYSTEM.SCOUNTRY,
+                                    SCENTERCOST      => T_SCENTERCOST,
+                                    SCASHFLOW        => T_SCASHFLOW,
+                                    SGEOZONE         => T_SGEOZONE,
+                                    NTAX             => T_NTAX,
+                                    NPOLICY          => R_CUR_PRINC.NPOLICY,
+                                    SCLIENT          => SCLIENT_CON, --T_SCLIENT,
+                                    NCURRENCY        => R_CUR_CLAIM_CES.NCURRENCY,
+                                    DEFFECDATE       => R_CUR_CLAIM_CES.DEFFECDATE,
+                                    NLINE            => R_TAB_SUNSYSTEM.NLINE);
+                  END LOOP;
+
+                  CRETRACE2 ('INSPOSTGIL9001', 999, 'NNUMBER  : ' || 'SINIESTRO CEDIDO');
+               END LOOP;
+            END IF;
+         END IF;
+      END LOOP;
+
+      COMMIT;
+   END;
+   /*
+EXCEPTION
+   WHEN OTHERS THEN
+      NERROR := -1;
+      SERRORDESC := 'ERROR: ' || SQLERRM;*/
+END INSPOSTGIL9001; 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 

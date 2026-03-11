@@ -1,0 +1,55 @@
+SELECT
+    rPol.scertype,
+    rPol.nbranch,
+    rPol.nproduct,
+    rPol.npolicy,
+    rPol.ncertif,
+    rPol.nrole,
+    crol.sdescript AS Rol,
+    rPol.sclient,
+    cli.scliename NombreCliente,
+    rPol.deffecdate FechaRegistro,
+    rPol.dcompdate FechaUltimaActualizacion,
+    rPol.dnulldate FechaAnulacion,
+    rPol.nusercode,
+     Usr.scliename UsuarioCreacionModificacion,
+    rPol.nintermed,
+    rPol.dbirthdate As FechaNacimiento,
+    rPol.ssexclien,
+    Sex.sdescript as Sexo,
+    rPol.ssmoking,
+    rPol.ntyperisk,
+    rPol.svip,
+    rPol.nstatusrol,
+    EstRol.sdescript Estado,
+    rPol.nrating,
+    rPol.ntypename,
+    rPol.ncoverpos,
+    rPol.dcontinue,
+    rPol.ncontrat_pay,
+    rPol.scontinued,
+    rPol.sprintname,
+    rPol.sitem,
+    rPol.nweight,
+    rPol.nheight,
+    rPol.nimc,
+    rPol.ntypelist,
+    rPol.dpepsearch,
+    rPol.nuserpepsearch,
+    rPol.sfphysical_creden,
+    rPol.nclasstypdoc,
+    rPol.ntypclientdoc,
+    rPol.ncity_residence,
+    rPol.sshort_des,
+    rPol.nseveritypep,
+    rPol.nindauthpep,
+    rPol.dpepstatus,
+    rPol.ncapital
+FROM
+    roles rPol
+INNER JOIN Table12 cRol on rPol.nrole= cRol.nrole
+INNER JOIN CLIENT cli on rPol.sclient= cli.sclient
+INNER JOIN CLIENT Usr on rPol.nusercode= Usr.sclient
+INNER JOIN Table18 Sex on rpol.ssexclien= sex.ssexclien
+INNER JOIN Table5561 EstRol on rpol.nstatusrol= estrol.nstatusrol
+WHERE rPol.npolicy=1485 and rPol.scertype=2  and rPol.nbranch=5 and rPol.nproduct=700

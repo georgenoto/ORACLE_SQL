@@ -1,0 +1,31 @@
+Identificar sesiones bloqueadas y bloqueadoras:
+sql
+
+SELECT
+    s1.username || '@' || s1.machine || ' (SID=' || s1.sid || ')' AS blocker,
+    s2.username || '@' || s2.machine || ' (SID=' || s2.sid || ')' AS waiter,
+    s1.sql_id AS blocker_sql_id,
+    s2.sql_id AS waiter_sql_id,
+    s2.seconds_in_wait,
+    s2.event
+FROM v$session s1
+JOIN v$session s2 ON s1.sid = s2.blocking_session
+WHERE s2.blocking_session IS NOT NULL;
+
+
+Esta consulta muestra quién está bloqueando a quién, el SID de cada uno y la sentencia SQL involucrada.
+Ver objetos bloqueados:
+
+
+sql
+SELECT lo.session_id, lo.oracle_username, lo.os_user_name,
+       ao.object_name, ao.object_type, lo.locked_mode
+FROM v$locked_object lo
+JOIN dba_objects ao ON lo.object_id = ao.object_id;
+
+
+Identifica qué objetos (tablas) están bloqueados y por qué usuario.
+Matar la sesión bloqueadora (si es necesario):
+sql
+-- Reemplazar sid y serial# con los valores obtenidos de las consultas anteriores
+ALTER SYSTEM KILL SESSION 'sid,serial#';

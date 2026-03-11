@@ -1,0 +1,64 @@
+
+User: system
+gnoto123*
+
+
+Oracle maneja una sola base de datos por servidor. (se podria tener mas, pero no es recomendable). Para manejar distintos proyectos, Oracle maneja esquemas.
+	select * from V$Database
+Esquema y usuario, para oracle es lo mismo.
+	select * from dba_users
+	
+	
+--------------------------------------------------------------------
+Listar todos los usuarios/esquemas de la BD
+	select * from dba_users
+	
+Cambiar la fecha de expiración de la contraseña
+	ALTER PROFILE DEFAULT LIMIT PASSWORD_LIFE_TIME 90 -- Contraseña Caduca cada 90 días
+	ALTER PROFILE DEFAULT LIMIT PASSWORD_LIFE_TIME UNLIMITED -- Contraseña no caduca
+
+Cambiar la contraseña de un usuario/esquemas
+	ALTER USER SYSTEM IDENTIFIED BY 123_NuevaContraseña
+
+Al cambiar la clave el usuario no puede reutilizar su clave por 90 días
+	ALTER PROFILE DEFAULT LIMIT PASSWORD_REUSE_TIME 90 PASSWORD_REUSE_MAX UNLIMITED;
+	
+
+Desbloquear al usuario
+	ALTER USER SYSTEM ACCOUNT UNLOCK -- NO funciona para aquellas que se han bloqueado por su fecha de expiración de la contraseña
+----------------------------------------------------------------------	
+--Crear nuevo usuario
+CREATE USER UserEsquema_Prueba IDENTIFIED BY "123456"
+DEFAULT TABLESPACE USERS  --Parametros opcionales
+TEMPORARY TABLESPACE TEMP --Parametros opcionales
+QUOTA UNLIMITED ON USERS  --Parametros opcionales
+
+-- Habilitar los privilegios de usuario
+GRANT CREATE SESSION TO UserEsquema_Prueba;
+GRANT CREATE TABLE TO UserEsquema_Prueba;
+GRANT CREATE VIEW TO UserEsquema_Prueba;
+GRANT CREATE PROCEDURE TO UserEsquema_Prueba;
+GRANT CREATE TRIGGER TO UserEsquema_Prueba;
+GRANT CREATE SEQUENCE TO UserEsquema_Prueba;
+GRANT CREATE JOB TO UserEsquema_Prueba;
+GRANT DBA TO UserEsquema_prueba
+
+-- Permisos para crear usuarios
+ALTER SESSION SET "_ORACLE_SCRIPT"=True;
+
+
+--- Permisos para insertar datos en tabla
+GRANT CONNECT TO Useresquema_prueba
+GRANT RESOURCE TO UserEsquema_prueba
+
+ALTER User useresquema_prueba quota unlimited on users
+
+
+------------------------------------------------------------------------
+Comando en la consola de nuget, para enlazar a la bd de Oracle
+Scaffold-DbContext "User Id=UserEsquema_Prueba; Password=123456:Data Source=localhost:1521/xe" Oracle.EntityFrameworkCore -OutputDir Models
+
+----------------------------------------------
+ ******** Buscar palabras en la BD ************
+
+select * from SYS.ALL_SOURCE where upper(TEXT) like '%GETCUOTAS%';

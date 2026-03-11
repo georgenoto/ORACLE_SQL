@@ -1,0 +1,63 @@
+/* PROCEDIMIENTO PARA BUSCAR EL RUT Y NOMBRE DEL CLIENTE POR ROL */
+   PROCEDURE FIND_ROLE 
+/*--------------------------------------------------------------------------------------*/
+/* NOMBRE    : FIND_ROLE                                                                */
+/* OBJETIVO  : BUSCA EL RUT Y NOMBRE DEL CLIENTE POR ROL                                */
+/*--------------------------------------------------------------------------------------*/
+   (
+      SCERTYPE              CERTIFICAT.SCERTYPE%TYPE,
+      NBRANCH               CERTIFICAT.NBRANCH%TYPE,
+      NPRODUCT              CERTIFICAT.NPRODUCT%TYPE,
+      NPOLICY               CERTIFICAT.NPOLICY%TYPE,
+      NCERTIF               CERTIFICAT.NCERTIF%TYPE,
+      DSTARTDATE            CERTIFICAT.DSTARTDATE%TYPE,
+      NROLE                 ROLES.NROLE%TYPE,
+      SCLIENT_OUT     OUT   CLIENT.SCLIENT%TYPE,
+      SCLIENAME_OUT   OUT   CLIENT.SCLIENAME%TYPE
+   )
+   AS
+/*- CURSOR PARA OBTENER LOS DATOS DEL ROL */
+      CURSOR C_CLIENT
+      IS
+         SELECT CL.SCLIENT, CL.SCLIENAME, CL.SFIRSTNAME, CL.SLASTNAME,
+                CL.SLEGALNAME, CL.SLASTNAME2, CL.NPERSON_TYP
+           FROM ROLES ROL, CLIENT CL
+          WHERE ROL.SCERTYPE = FIND_ROLE.SCERTYPE
+            AND ROL.NBRANCH = FIND_ROLE.NBRANCH
+            AND ROL.NPRODUCT = FIND_ROLE.NPRODUCT
+            AND ROL.NPOLICY = FIND_ROLE.NPOLICY
+            AND ROL.NROLE = FIND_ROLE.NROLE
+            AND ROL.DEFFECDATE <= FIND_ROLE.DSTARTDATE
+            AND (ROL.DNULLDATE > FIND_ROLE.DSTARTDATE OR ROL.DNULLDATE IS NULL
+                )
+            AND CL.SCLIENT = ROL.SCLIENT;
+
+      R_CLIENT   C_CLIENT%ROWTYPE;
+   BEGIN
+      OPEN C_CLIENT;
+
+      FETCH C_CLIENT
+       INTO R_CLIENT;
+
+      CLOSE C_CLIENT;
+
+/*+ SI EL CLIENTE EXISTE SE LLENA LA VARIABLE DEL NOMBRE DEL CLIENTE */
+      IF R_CLIENT.NPERSON_TYP = 1 THEN
+/*+ SE ASIGNA EL RUT Y EL NOMBRE DEL ROL */
+         SCLIENT_OUT := R_CLIENT.SCLIENT;
+         SCLIENAME_OUT := R_CLIENT.SCLIENAME;
+      ELSE
+/*+ SE ASIGNA EL RUT Y EL NOMBRE DEL ROL */
+         SCLIENT_OUT := R_CLIENT.SCLIENT;
+         SCLIENAME_OUT := R_CLIENT.SLEGALNAME;
+      END IF;
+
+      IF SCLIENT_OUT IS NOT NULL AND SCLIENAME_OUT IS NULL THEN
+         SCLIENAME_OUT :=
+               R_CLIENT.SFIRSTNAME
+            || ' '
+            || R_CLIENT.SLASTNAME
+            || ' '
+            || R_CLIENT.SLASTNAME2;
+      END IF;
+   END FIND_ROLE;

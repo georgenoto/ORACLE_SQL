@@ -1,0 +1,3843 @@
+create or replace PROCEDURE INSCOLLECTIONBATCH 
+/*-------------------------------------------------------------------------------------*/
+/* NOMBRE    : INSUDB.INSCOLLECTIONBATCH                                               */
+/* OBJETIVO  : PROCESO DE GENERACION DE COBRANZA                                       */
+/* PARaMETROS: 1 - DEXPIRDAT    : FECHA DE VENCIMIENTO                                 */
+/*             2 - NWAY_PAY     : VIA DE PAGO                                          */
+/*             3 - NINSUR_AREA  : AREA DE SEGURO                                       */
+/*             4 - NCOD_AGREE   : CONVENIO                                             */
+/*             5 - NBANK        : CODIGO DEL BANCO                                     */
+/*             6 - SOPT GENERA   : TIPO GENERACION 1.RECIBO 2.POLIZA 3.CLIENTE          */
+/*             7 - SOPTCURRENCY : MONEDA DE LA GENERACION 1.ORIGEN 2.LOCAL             */
+/*             8 - SOPTPROCESS  : PROCESO 1.PRELIMINAR 2.DEFINITIVO                    */
+/*             9 - DINCREASE    : FECHA DE VALORIZACION                                */
+/*            10 - SKEY         : LLAVE DE PROCESO                                     */
+/*            11 - NUSERCODE    : CODIGO DEL USUARIO                                   */
+/*            12 - SPROCESS     : INDICADOR DE REGISTROS PROCESADOS                    */
+/*                                 (1- PROCESADOS, 2- NO PROCESADOS)                   */
+/*            13 - SNOPROCESS   : INDICADOR DE REGISTROS NO PROCESADOS                 */
+/*                                (TMP_BATCH_ERROR 1 - NO PROCESADOS                   */
+/*                                                 2 - PROCESADOS)                     */
+/*            14 - STAKEOLD     : ELIMINAR COBRANZA ANTIGUA                            */
+/*                                                 1 - SI,                             */
+/*                                                 2 - NO                              */
+/*            15 - SCLIENT      : CODIGO DEL CONTRATANTE                               */
+/*                                                                                     */
+/* SOURCESAFE INFORMATION:                                                             */
+/*     $AUTHOR:: NVAPLA10       $                                                      */
+/*     $DATE:: 28/09/04 6:38P   $                                                      */
+/*     $REVISION:: 108          $                                                      */
+/*-------------------------------------------------------------------------------------*/
+    (DEXPIRDAT          PREMIUM.DEXPIRDAT%TYPE   ,
+    NWAY_PAY            PREMIUM.NWAY_PAY%TYPE    ,
+    NINSUR_AREA         PREMIUM.NINSUR_AREA%TYPE ,
+    NCOD_AGREE          PREMIUM.NCOD_AGREE%TYPE  ,
+    NBANK               DIR_DEBIT.NBANKEXT%TYPE  ,
+    SOPTGENERA          VARCHAR2                 ,
+    SOPTCURRENCY        VARCHAR2                 ,
+    SOPTPROCESS         VARCHAR2                 ,
+    DINCREASE           DATE                     ,
+    SKEY                VARCHAR2                 ,
+    NUSERCODE           USERS.NUSERCODE%TYPE     ,
+    SPROCESS     IN OUT VARCHAR                  ,
+    SNOPROCESS   IN OUT VARCHAR                  ,
+    STAKEOLD            VARCHAR2 DEFAULT '2'     ,
+    NBRANCH_P           PREMIUM.NBRANCH%TYPE     ,
+    SCLIENT             CLIENT.SCLIENT%TYPE      ,
+    NTYP_CRECARD        DIR_DEBIT.NTYP_CRECARD%TYPE,
+    NPRODUCT_P          PREMIUM.NPRODUCT%TYPE    ) AUTHID CURRENT_USER AS
+
+/*+ VARIABLES PARA EL MANEJO DE ERRORES */
+    STOO_ROWCNT         INTEGER           ;
+
+    DEXPIRDAT_AUX       PREMIUM.DEXPIRDAT%TYPE;
+    SEXPIRDAT_DD        VARCHAR2(2);
+    DLASTEXPIRDAT       PREMIUM.DEXPIRDAT%TYPE;
+
+    SDIGIT_AUX          TMP_COLLECTION.SDIGIPOL%TYPE;
+    SMESSAGED           VARCHAR2(100);     
+    BUPDAGREE           BOOLEAN;
+
+/*+ SE DECLARA EL CURSOR PRINCIPAL DE EXTRACCION DE DATOS                             */
+/*+ LA INFORMACION DE LAS PROPUESTAS SE TOMO EN BASE A LAS VISTA UTILIZADA PARA       */
+/*+ BUSCAR LA INFORMACION DE LAS POLIZAS + LA CONDICION PROPIA PARA LAS PROPUESTAS    */
+
+    SOLDCLIENT          PREMIUM.SCLIENT%TYPE;
+
+    STAKEOLD_AUX        VARCHAR2(2);
+    SLASTRECEIPT_AUX    WAY_PAY_PROD.SLASTRECEIPT%TYPE;
+    NBILL_DAY_P           CERTIFICAT.NBILL_DAY%TYPE;
+    BCONTINUE           BOOLEAN;
+
+/*+ SE DECLARA EL CURSOR PARA RECORRER LOS RECIBOS */
+    CURSOR REAPREMIUM_C1(P_NTYPE PREMIUM.NTYPE%TYPE) IS
+        SELECT PRE.NCURRENCY      "NCURRENCY"    ,
+               PRE.SCERTYPE       "SCERTYPE"     ,
+               PRE.NBRANCH        "NBRANCH"      ,
+               PRE.NPRODUCT       "NPRODUCT"     ,
+               PRE.NPOLICY        "NPOLICY"      ,
+               PRE.NCERTIF        "NCERTIF"      ,
+               PRE.DLIMITDATE     "DLIMITDATE"   ,
+               PRE.NRECEIPT       "NRECEIPT"     ,
+               DECODE(PRE.NWAY_PAY,3,DECODE(NVL(PRE.NCOD_AGREE,0),0,TRIM(PRE.SCLIENT),TRIM(REAGENERALPKG.REASCLIENT_AGREEMENT(PRE.NCOD_AGREE))),TRIM(PRE.SCLIENT))    "SCLIENT",
+               PRE.NSTATUS_PRE    "NSTATUS_PRE"  ,
+               PRE.NTRATYPEI      "NTRATYPEI"    ,
+               PRE.DEFFECDATE     "DEFFECDATE"   ,
+               PRE.DEXPIRDAT      "DEXPIRDAT"    ,
+               PRE.NDIGIT         "NDIGIT"       ,
+               PRE.NPAYNUMBE      "NPAYNUMBE"    ,
+               PRE.NCONTRAT       "NCONTRAT"     ,
+               DECODE(PRE.NWAY_PAY,3,PRE.NCOD_AGREE,0)     "NCOD_AGREE"   ,
+               PRE.NTYPE          "NTYPE"        ,
+               PRE.NBULLETINS     "NBULLETINS"   ,
+               TO_NUMBER( NULL )  "NDRAFT"       ,
+               PRE.NPREMIUM       "NAMOUNT"      ,
+               1                  "NCOLLECDOCTYP",
+               PRE.NBALANCE       "NBALANCE"     ,
+               CER.SDIRIND        "SDIRIND"      ,
+               CER.NSENDADDR      "NSENDADDR"    ,
+               CER.NDIGIT         "NDIGITPOL",
+               DECODE(PR.SBRANCHT, '6' ,6, NVL(PRE.NPAYFREQ, CER.NPAYFREQ))    "NPAYFREQ",
+               CASE 
+                WHEN PR.SBRANCHT = 6 THEN /* RAMO SOAP */
+                   REAGENERALPKG.REAEXCHANGELOCAL(PRE.NCURRENCY,NVL(CER.DISSUEDAT,CER.DSTARTDATE))
+                WHEN CER.NPAYFREQ = 6 THEN  /* FRECUENCIA UNICA, RAMO DISTINTO A SOAP*/
+                   REAGENERALPKG.REAEXCHANGELOCAL(PRE.NCURRENCY,CER.DSTARTDATE)
+                ELSE
+                 NULL
+               END "NEXCHANGE_UNIQUE",         
+               DECODE(PR.SBRANCHT, '6' , CER.DISSUEDAT,CER.DSTARTDATE) "DSTARTDATE",
+               --CER.DSTARTDATE  "DSTARTDATE",
+               PRE.NINSUR_AREA    "NINSUR_AREA",
+               NVL(PRE.NBILL_DAY,CER.NBILL_DAY)      "NBILL_DAY",
+               NVL(PRE.SDOCUMENT,'0')  "SDOCUMENT",
+               NVL(PRE.NBANK_CODE,0)  "NBANK_CODE",
+               CER.SCLIENTSPONSOR "SCLIENTSPONSOR"
+          FROM PREMIUM PRE , AGREEMENT AGR, CERTIFICAT CER, POLICY POL, PRODMASTER PR          
+         WHERE PRE.SCERTYPE                 = '2'
+           AND PRE.NSTATUS_PRE             IN (1,4)
+           AND PR.NBRANCH                  = CER.NBRANCH
+           AND PR.NPRODUCT                 = CER.NPRODUCT
+--   AND PRE.NRECEIPT IN (8091360)
+           AND PRE.NWAY_PAY                 = INSCOLLECTIONBATCH.NWAY_PAY
+           AND PRE.SSTATUSVA           NOT IN ('2','3','6')
+           AND PRE.NINSUR_AREA              = INSCOLLECTIONBATCH.NINSUR_AREA
+           AND PRE.NTYPE                    = P_NTYPE
+           AND PRE.NBALANCE > 0
+           AND (PRE.NCOD_AGREE              = INSCOLLECTIONBATCH.NCOD_AGREE
+                OR  INSCOLLECTIONBATCH.NCOD_AGREE IS NULL)
+             AND (PRE.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+           AND (PRE.NPRODUCT               = INSCOLLECTIONBATCH.NPRODUCT_P
+                OR  NVL(INSCOLLECTIONBATCH.NPRODUCT_P,0) = 0   )
+           AND (PRE.DLIMITDATE              <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX
+             OR ( CER.NPAYFREQ <>  5 AND PRE.DEFFECDATE             <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX )) -- SI LA FACTURACION ES DIFERENTE A MENSUAL SE DEBE IR A COBRO LO PENDIENTE A LA FECHA  
+           AND NVL(PRE.NBULLETINS,0)        = 0
+          AND NOT EXISTS (SELECT 'x'
+                            FROM PREMIUM PRE1
+                           INNER JOIN BULLETINS BUL
+                              ON BUL.NBULLETINS =  PRE1.NBULLETINS
+                             AND BUL.NSTATUS      NOT IN (2,3) -- DISTINTO DE COBRADO O ANULADO
+                           INNER JOIN COLLECT_GEN COL
+                              ON COL.NBULLETINS   = BUL.NBULLETINS
+                             AND COL.NWAY_PAY     = PRE1.NWAY_PAY
+                             AND TO_CHAR(COL.DCOLLEC_DATE, 'YYYYMM') < TO_CHAR(INSCOLLECTIONBATCH.DEXPIRDAT, 'YYYYMM')   
+                           WHERE PRE1.SCERTYPE = PRE.SCERTYPE
+                             AND PRE1.NBRANCH  = PRE.NBRANCH
+                             AND PRE1.NPRODUCT = PRE.NPRODUCT
+                             AND PRE1.NPOLICY  = PRE.NPOLICY
+                             AND PRE1.NCERTIF  = PRE.NCERTIF
+                             AND PRE1.NSTATUS_PRE IN (1,4)
+                             AND NVL(PRE1.NBULLETINS,0) != 0)
+           AND (PRE.SCLIENT                 = INSCOLLECTIONBATCH.SCLIENT
+            OR  INSCOLLECTIONBATCH.SCLIENT IS NULL)
+           AND AGR.NCOD_AGREE         (+)  = PRE.NCOD_AGREE
+           AND PRE.SCERTYPE                 = CER.SCERTYPE
+           AND PRE.NBRANCH                  = CER.NBRANCH
+           AND PRE.NPRODUCT                 = CER.NPRODUCT
+           AND PRE.NPOLICY                  = CER.NPOLICY
+           AND PRE.NCERTIF                  = CER.NCERTIF
+           AND POL.SCERTYPE                 = CER.SCERTYPE
+           AND POL.NBRANCH                  = CER.NBRANCH
+           AND POL.NPRODUCT                 = CER.NPRODUCT
+           AND POL.NPOLICY                  = CER.NPOLICY
+           AND (CER.SSTATUSVA IN ('1','4','5') OR ( CER.SSTATUSVA = '6' AND CER.DNULLDATE > INSCOLLECTIONBATCH.DEXPIRDAT_AUX))
+--           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX < CER.DCOLLSUS_INI OR CER.DCOLLSUS_INI IS NULL)
+--           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX > CER.DCOLLSUS_END OR CER.DCOLLSUS_END IS NULL)
+           AND NVL(CER.SCLAIMIND,'0') <> '1' --QUE NO TENGA SINIESTRO DE PERDIDA TOTAL 
+           AND (INSCOLLECTIONBATCH.NWAY_PAY <> 3
+           OR ( INSCOLLECTIONBATCH.NWAY_PAY = 3 AND EXISTS ( SELECT 1 FROM AGREEMENT A WHERE A.NCOD_AGREE = PRE.NCOD_AGREE AND NVL(SNOCOLLECTION,'2') <> '1') ))
+           AND ((CER.NPAYFREQ                != 6 AND POL.SPOLITYPE ='1') OR POL.SPOLITYPE ='2') --SE EXCLUYE DE LA COBRANZA LAS POLIZAS INDIVIDUALES CON FRECUENCIA DE PAGO UNICA
+           AND GETCREDITCARD_INFO(INSCOLLECTIONBATCH.NWAY_PAY,CER.SCERTYPE,CER.NBRANCH,CER.NPRODUCT,CER.NPOLICY,CER.NCERTIF,INSCOLLECTIONBATCH.DEXPIRDAT,PRE.SCLIENT, INSCOLLECTIONBATCH.NTYP_CRECARD) = 1
+
+      UNION
+        SELECT PRE.NCURRENCY      "NCURRENCY"    ,
+               PRE.SCERTYPE       "SCERTYPE"     ,
+               PRE.NBRANCH        "NBRANCH"      ,
+               PRE.NPRODUCT       "NPRODUCT"     ,
+               PRE.NPOLICY        "NPOLICY"      ,
+               PRE.NCERTIF        "NCERTIF"      ,
+               PRE.DLIMITDATE     "DLIMITDATE"   ,
+               PRE.NRECEIPT       "NRECEIPT"     ,
+               DECODE(PRE.NWAY_PAY,3,DECODE(NVL(PRE.NCOD_AGREE,0),0,TRIM(PRE.SCLIENT),TRIM(REAGENERALPKG.REASCLIENT_AGREEMENT(PRE.NCOD_AGREE))),TRIM(PRE.SCLIENT))    "SCLIENT",
+               PRE.NSTATUS_PRE    "NSTATUS_PRE"  ,
+               PRE.NTRATYPEI      "NTRATYPEI"    ,
+               PRE.DEFFECDATE     "DEFFECDATE"   ,
+               PRE.DEXPIRDAT      "DEXPIRDAT"    ,
+               PRE.NDIGIT         "NDIGIT"       ,
+               PRE.NPAYNUMBE      "NPAYNUMBE"    ,
+               PRE.NCONTRAT       "NCONTRAT"     ,
+               DECODE(PRE.NWAY_PAY,3,PRE.NCOD_AGREE,0)     "NCOD_AGREE"   ,
+               PRE.NTYPE          "NTYPE"        ,
+               PRE.NBULLETINS     "NBULLETINS"   ,
+               TO_NUMBER( NULL )  "NDRAFT"       ,
+               PRE.NPREMIUM       "NAMOUNT"      ,
+               1                  "NCOLLECDOCTYP",
+               PRE.NBALANCE       "NBALANCE"     ,
+               CER.SDIRIND        "SDIRIND"      ,
+               CER.NSENDADDR      "NSENDADDR"    ,
+               CER.NDIGIT         "NDIGITPOL",
+               DECODE(PR.SBRANCHT, '6' ,6, NVL(PRE.NPAYFREQ, CER.NPAYFREQ))   "NPAYFREQ",
+               CASE 
+                WHEN PR.SBRANCHT = 6 THEN /* RAMO SOAP */
+                   REAGENERALPKG.REAEXCHANGELOCAL(PRE.NCURRENCY,NVL(CER.DISSUEDAT,CER.DSTARTDATE))
+                WHEN CER.NPAYFREQ = 6 THEN /* FRECUENCIA UNICA, RAMO DISTINTO A SOAP*/
+                   REAGENERALPKG.REAEXCHANGELOCAL(PRE.NCURRENCY,CER.DSTARTDATE)
+                ELSE
+                 NULL
+               END "NEXCHANGE_UNIQUE",
+               DECODE(PR.SBRANCHT, '6' , CER.DISSUEDAT,CER.DSTARTDATE)  "DSTARTDATE",
+               PRE.NINSUR_AREA    "NINSUR_AREA",
+               NVL(PRE.NBILL_DAY,CER.NBILL_DAY)   "NBILL_DAY",
+               NVL(PRE.SDOCUMENT,'0') "SDOCUMENT",
+               NVL(PRE.NBANK_CODE,0)  "NBANK_CODE",
+               CER.SCLIENTSPONSOR "SCLIENTSPONSOR"
+          FROM PREMIUM PRE , AGREEMENT AGR, CERTIFICAT CER, PRODMASTER PR
+         WHERE PRE.SCERTYPE                 = '1'
+           AND PR.NBRANCH                  = CER.NBRANCH
+           AND PR.NPRODUCT                 = CER.NPRODUCT
+           AND PRE.NSTATUS_PRE             IN (1,4)
+           AND CER.NWAIT_CODE = 100    -- ENVIA A COBRO PROPUESTAS EN RIESGO APROBADO
+           AND CER.NSTATQUOTA = 1
+--  AND PRE.NRECEIPT IN (8091360)
+           AND PRE.NWAY_PAY                 = INSCOLLECTIONBATCH.NWAY_PAY
+           AND PRE.NINSUR_AREA              = INSCOLLECTIONBATCH.NINSUR_AREA
+           AND PRE.NTYPE                    = P_NTYPE
+           AND PRE.NBALANCE > 0
+           AND (PRE.NCOD_AGREE              = INSCOLLECTIONBATCH.NCOD_AGREE
+                OR  INSCOLLECTIONBATCH.NCOD_AGREE IS NULL)
+             AND (PRE.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+             AND (PRE.NPRODUCT               = INSCOLLECTIONBATCH.NPRODUCT_P
+                OR  NVL(INSCOLLECTIONBATCH.NPRODUCT_P,0) = 0   )
+           AND (PRE.DLIMITDATE              <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX
+             OR ( CER.NPAYFREQ <>  5 AND PRE.DEFFECDATE             <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX )) -- SI LA FACTURACION ES DIFERENTE A MENSUAL SE DEBE IR A COBRO LO PENDIENTE A LA FECHA  
+           AND NVL(PRE.NBULLETINS,0)        = 0
+          AND NOT EXISTS (SELECT 'x'
+                            FROM PREMIUM PRE1
+                           INNER JOIN BULLETINS BUL
+                              ON BUL.NBULLETINS =  PRE1.NBULLETINS
+                             AND BUL.NSTATUS      NOT IN (2,3) -- DISTINTO DE COBRADO O ANULADO
+                           INNER JOIN COLLECT_GEN COL
+                              ON COL.NBULLETINS   = BUL.NBULLETINS
+                             AND COL.NWAY_PAY     = PRE1.NWAY_PAY
+                             AND TO_CHAR(COL.DCOLLEC_DATE, 'YYYYMM') < TO_CHAR(INSCOLLECTIONBATCH.DEXPIRDAT, 'YYYYMM')   
+                           WHERE PRE1.SCERTYPE = PRE.SCERTYPE
+                             AND PRE1.NBRANCH  = PRE.NBRANCH
+                             AND PRE1.NPRODUCT = PRE.NPRODUCT
+                             AND PRE1.NPOLICY  = PRE.NPOLICY
+                             AND PRE1.NCERTIF  = PRE.NCERTIF
+                             AND PRE1.NSTATUS_PRE IN (1,4)
+                             AND NVL(PRE1.NBULLETINS,0) != 0)
+           AND (PRE.SCLIENT                 = INSCOLLECTIONBATCH.SCLIENT
+            OR  INSCOLLECTIONBATCH.SCLIENT IS NULL)
+           AND AGR.NCOD_AGREE         (+)  = PRE.NCOD_AGREE
+           AND PRE.SCERTYPE                 = CER.SCERTYPE
+           AND PRE.NBRANCH                  = CER.NBRANCH
+           AND PRE.NPRODUCT                 = CER.NPRODUCT
+           AND PRE.NPOLICY                  = CER.NPOLICY
+           AND PRE.NCERTIF                  = CER.NCERTIF
+--           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX < CER.DCOLLSUS_INI OR CER.DCOLLSUS_INI IS NULL)
+--           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX > CER.DCOLLSUS_END OR CER.DCOLLSUS_END IS NULL)
+           AND (INSCOLLECTIONBATCH.NWAY_PAY <> 3
+           OR ( INSCOLLECTIONBATCH.NWAY_PAY = 3 AND EXISTS ( SELECT 1 FROM AGREEMENT A WHERE A.NCOD_AGREE = PRE.NCOD_AGREE AND NVL(SNOCOLLECTION,'2') <> '1') ))
+           AND CER.NPAYFREQ                != 6 --SE EXCLUYE DE LA COBRANZA LAS POLIZAS CON FRECUENCIA DE PAGO UNICA
+           AND GETCREDITCARD_INFO(INSCOLLECTIONBATCH.NWAY_PAY,CER.SCERTYPE,CER.NBRANCH,CER.NPRODUCT,CER.NPOLICY,CER.NCERTIF,INSCOLLECTIONBATCH.DEXPIRDAT,PRE.SCLIENT, INSCOLLECTIONBATCH.NTYP_CRECARD) = 1        
+      ORDER BY 1, 2, 3, 4, 5, 6, 11 DESC , 7, 8;
+
+/*+ SE DECLARA EL CURSOR PARA RECORRER LOS RECIBOS Y SUS CUOTAS */
+    CURSOR REAPREMIUM_C2 IS
+        SELECT PRE.NINSUR_AREA "NINSUR_AREA"   ,
+               PRE.NBRANCH     "NBRANCH"       ,
+               PRE.NPRODUCT    "NPRODUCT"      ,
+               PRE.NPOLICY     "NPOLICY"       ,
+               PRE.NCERTIF     "NCERTIF"       ,
+               PRE.NRECEIPT    "NRECEIPT"      ,
+               PRE.SCLIENT     "SCLIENT"       ,
+               FDR.NSTAT_DRAFT "NSTATUS_PRE"   ,
+               PRE.NTRATYPEI   "NTRATYPEI"     ,
+               PRE.DEFFECDATE  "DEFFECDATE"    ,
+               FDR.DEXPIRDAT   "DEXPIRDAT"     ,
+               FDR.DLIMITDATE  "DLIMITDATE"    ,
+               FCO.NCURRENCY   "NCURRENCY"     ,
+               PRE.NDIGIT      "NDIGIT"        ,
+               PRE.NPAYNUMBE   "NPAYNUMBE"     ,
+               PRE.NCONTRAT    "NCONTRAT"      ,
+               PRE.NCOD_AGREE  "NCOD_AGREE"    ,
+               1               "NTYPE"         ,
+               FDR.NBULLETINS  "NBULLETINS"    ,
+               FDR.NDRAFT      "NDRAFT"        ,
+               FDR.NAMOUNT     "NAMOUNT"       ,
+               2               "NCOLLECDOCTYP" ,
+               0               "NBALANCE"      ,
+               PRE.SCERTYPE    "SCERTYPE"      ,
+               CER.SDIRIND     "SDIRIND"       ,
+               CER.NSENDADDR   "NSENDADDR"     ,
+               CER.NDIGIT      "NDIGITPOL",
+               NVL(PRE.NPAYFREQ, CER.NPAYFREQ)    "NPAYFREQ",
+               DECODE(CER.NPAYFREQ,6,REAGENERALPKG.REAEXCHANGELOCAL(PRE.NCURRENCY,CER.DSTARTDATE),NULL) "NEXCHANGE_UNIQUE",
+               CER.DSTARTDATE  "DSTARTDATE",
+               NVL(PRE.NWAY_PAY, CER.NWAY_PAY)      "NWAY_PAY",
+               NVL(PRE.NBILL_DAY,CER.NBILL_DAY)      "NBILL_DAY",
+               NVL(PRE.SDOCUMENT,0)  "SDOCUMENT",
+               NVL(PRE.NBANK_CODE,0)  "NBANK_CODE",
+               CER.SCLIENTSPONSOR "SCLIENTSPONSOR"
+          FROM PREMIUM PRE    , CERTIFICAT CER , FINANCE_CO FCO ,
+               FINANC_DRA FDR
+         WHERE PRE.SCERTYPE       = '2'
+           AND PRE.NSTATUS_PRE    = 8
+           AND PRE.SSTATUSVA NOT IN ('2','3','6')
+           AND PRE.NINSUR_AREA    = INSCOLLECTIONBATCH.NINSUR_AREA
+           AND (PRE.NCOD_AGREE    = INSCOLLECTIONBATCH.NCOD_AGREE
+            OR INSCOLLECTIONBATCH.NCOD_AGREE IS NULL )
+           AND PRE.SCERTYPE       = CER.SCERTYPE
+           AND PRE.NBRANCH        = CER.NBRANCH
+           AND PRE.NPRODUCT       = CER.NPRODUCT
+           AND PRE.NPOLICY        = CER.NPOLICY
+           AND PRE.NCERTIF        = CER.NCERTIF
+           AND NVL(PRE.NBULLETINS,0)        = 0
+--           AND CER.SSTATUSVA NOT IN ('6','8')
+           AND (CER.SSTATUSVA IN ('1','4','5') OR ( CER.SSTATUSVA = '6' AND CER.DNULLDATE > INSCOLLECTIONBATCH.DEXPIRDAT_AUX))
+           AND FCO.NCONTRAT       = PRE.NCONTRAT
+           AND FDR.NCONTRAT       = FCO.NCONTRAT
+           AND FCO.NSTAT_CONTR   IN (1,2,4) --1-CUOTA INICIAL PENDIENTE  2-VIGENTE  4- ANULADO
+           AND FCO.DEFFECDATE <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX
+           AND (FCO.DNULLDATE IS NULL
+                OR  FCO.DNULLDATE > INSCOLLECTIONBATCH.DEXPIRDAT_AUX)
+           AND (PRE.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                OR   NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0 )
+           AND (PRE.NPRODUCT               = INSCOLLECTIONBATCH.NPRODUCT_P
+                OR   NVL(INSCOLLECTIONBATCH.NPRODUCT_P,0) = 0 )
+           AND (PRE.SCLIENT                          = INSCOLLECTIONBATCH.SCLIENT
+            OR  INSCOLLECTIONBATCH.SCLIENT          IS NULL)
+           AND FDR.NWAY_PAY       = INSCOLLECTIONBATCH.NWAY_PAY
+           AND FDR.NSTAT_DRAFT    = 1
+           AND FDR.DLIMITDATE    <= INSCOLLECTIONBATCH.DEXPIRDAT_AUX
+--           AND TO_CHAR(FDR.DLIMITDATE,'DD') = INSCOLLECTIONBATCH.SEXPIRDAT_DD
+           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX < CER.DCOLLSUS_INI OR CER.DCOLLSUS_INI IS NULL)
+           AND (INSCOLLECTIONBATCH.DEXPIRDAT_AUX > CER.DCOLLSUS_END OR CER.DCOLLSUS_END IS NULL)
+           AND NVL(CER.SCLAIMIND,'0') <> '1' --QUE NO TENGA SINIESTRO DE PERDIDA TOTAL
+           AND GETCREDITCARD_INFO(INSCOLLECTIONBATCH.NWAY_PAY,CER.SCERTYPE,CER.NBRANCH,CER.NPRODUCT,CER.NPOLICY,CER.NCERTIF,INSCOLLECTIONBATCH.DEXPIRDAT,PRE.SCLIENT, INSCOLLECTIONBATCH.NTYP_CRECARD) = 1
+           AND (INSCOLLECTIONBATCH.NWAY_PAY <> 3
+           OR ( INSCOLLECTIONBATCH.NWAY_PAY = 3 AND EXISTS ( SELECT 1 FROM AGREEMENT A WHERE A.NCOD_AGREE = PRE.NCOD_AGREE AND NVL(SNOCOLLECTION,'2') <> '1') ))
+           AND CER.NPAYFREQ                != 6 --SE EXCLUYE DE LA COBRANZA LAS POLIZAS CON FRECUENCIA DE PAGO UNICA
+      ORDER BY 13, 24, 2, 3, 4, 5, 12, 6;
+
+/*-TIPO DE REGISTRO PARA INFORMACION DE MONTOS DEL CLIENTE*/
+    TYPE TR_AMOUNT_CLIENT IS RECORD (NBANK_CODE  TMP_COLLECTION.NBANK_CODE%TYPE,
+                                     NBULLETINS  TMP_COLLECTION.NBULLETINS%TYPE,
+                                     NCODE_AGREE TMP_COLLECTION.NCODE_AGREE%TYPE,
+                                     SCLIENT     TMP_COLLECTION.SCLIENT%TYPE,
+                                     NCURRENCY   TMP_COLLECTION.NCURRENCY%TYPE,
+                                     NAMOUNT     TMP_COLLECTION.NAMOUNT%TYPE);
+
+    C_AMOUNT_CLIENT      REFCURSORPKG.RCT1;
+    R_AMOUNT_CLIENT      TR_AMOUNT_CLIENT;
+
+/*+ SE DEFINEN LAS VARIABLES A USAR DENTRO DE ESTE SP */
+    SACCOUNT            DIR_DEBIT_CLI.SACCOUNT%TYPE;
+    NBANKEXT            DIR_DEBIT.NBANKEXT%TYPE;
+    SCLIENTPAY          PREMIUM.SCLIENT%TYPE;
+    ST_TMPCHANGE        NUMBER;
+    NBULLETINS          BULLETINS.NBULLETINS%TYPE;
+    NBULLETINS_C        BULLETINS.NBULLETINS%TYPE;
+    NCOLLECDOCTYP       BULLETINS_DET.NCOLLECDOCTYP%TYPE;
+    NCURRENCY           BULLETINS.NCURRENCY%TYPE;
+    NAMOUNT             BULLETINS.NAMOUNT%TYPE;
+    NEXCHANGE           EXCHANGE.NEXCHANGE%TYPE := NULL;
+    NCOLLECT_EXP        OPT_PREMIU.NCOLLECT_EXP%TYPE;
+    NAMOUNT_TOTBOL      PREMIUM.NPREMIUM%TYPE;
+    NAMOUNT_TOTBOLD     COLLECT_GEN.NAMOUNT%TYPE;
+    NTYPEAGREE          AGREEMENT.NTYPEAGREE%TYPE;
+    CREATEHEAD          NUMBER(5);
+    SDOCUMENT           DIR_DEBIT_CLI.SACCOUNT%TYPE;
+    NTRATYPEI           NUMBER;
+    DCARDEXPIR          CRED_CARD.DCARDEXPIR%TYPE;
+
+/*+ VALORES ANTERIORES DE CORTE DE CONTROL */
+    NOLDCURRENCY        PREMIUM.NCURRENCY%TYPE;
+    NOLDPOLICY          PREMIUM.NPOLICY%TYPE;
+    NOLDRECEIPT         PREMIUM.NRECEIPT%TYPE;
+    NOLDBRANCH          PREMIUM.NBRANCH%TYPE;
+    NOLDPRODUCT         PREMIUM.NPRODUCT%TYPE;
+    DOLDLIMIT_DATE      TMP_COLLECTION.DLIMIT_DATE%TYPE;
+
+/*+ VARIABLES PARA RESCATAR DIRECCION */
+    NRECOWNER           ADDRESS.NRECOWNER%TYPE;
+    SKEYADDRESS         ADDRESS.SKEYADDRESS%TYPE;
+    SPOLICYKEY          ADDRESS.SKEYADDRESS%TYPE;
+    SCLIENTKEY          ADDRESS.SKEYADDRESS%TYPE;
+
+/*+ DOMICILIACION 1.- CLIENTES, 2.- POLIZA */
+    SDIRIND             VARCHAR(1);
+    NDIGIT              CERTIFICAT.NDIGIT%TYPE;
+
+/*+ INDICADOR DE CREACION EN REGISTROS EN TABLA TEMPORAL TMP_COLLECTION 1- SI 2- NO*/
+    NTABLECREATE        SMALLINT;
+
+/*+ MANEJO DE ERRORES, DESCRIPCION DEL ERROR */
+    SERROR              VARCHAR(255);
+
+/*+ DATOS DE DIRECCION */
+    C_ADDRESS       INSFINDADDRESSPKG.RCT1;
+    R_ADDRESS       ADDRESS%ROWTYPE;
+
+/*+ CURSOR PARA RECUPERAR LOS SALDOS A FAVOR DE LOS CLIENTES */
+    CURSOR C_TMP_MOVE_ACC IS
+        SELECT NTYP_ACCO , STYPE_ACC , SCLIENT ,
+               NCURRENCY , NAMOUNT   , ROWID   ,
+               DOPERDATE
+          FROM MOVE_ACC
+         WHERE NTYP_ACCO    = 5
+           AND NTYPE_MOVE IN (18,65,409)
+           AND NVL(SPROCESS_IND,'2') = '2';
+
+    NINDEX          INTEGER :=0;
+    DINCREASE_AUX   DATE;
+    NAMOUNT_LOCAL   TMP_COLLECTION.NAMOUNT%TYPE;
+
+    BPOLICY         BOOLEAN;
+    SCERTYPE        POLICY.SCERTYPE%TYPE;
+    NBRANCH         POLICY.NBRANCH%TYPE;
+    NPRODUCT        POLICY.NPRODUCT%TYPE;
+    NPOLICY         POLICY.NPOLICY%TYPE;
+    NCERTIF         CERTIFICAT.NCERTIF%TYPE;
+    DLIMITDATE      PREMIUM.DLIMITDATE%TYPE;
+    DLIMIT_TRATY    PREMIUM.DLIMITDATE%TYPE;
+    DLIMITDATE_AUX  PREMIUM.DLIMITDATE%TYPE;
+
+    SPROCE_P        CHAR;
+    SPROCE_I        CHAR;
+
+    SCERTYPE_OLD    POLICY.SCERTYPE%TYPE;
+    NBRANCH_OLD     POLICY.NBRANCH%TYPE;
+    NPRODUCT_OLD    POLICY.NPRODUCT%TYPE;
+    NPOLICY_OLD     POLICY.NPOLICY%TYPE;
+    NCERTIF_OLD     CERTIFICAT.NCERTIF%TYPE;
+    DLIMITDATE_OLD  PREMIUM.DLIMITDATE%TYPE;
+
+    NCOUNT          NUMBER;
+    NCOUNT_TRATY    NUMBER;
+    NORI_AMOUNT     TMP_COLLECTION.NORI_AMOUNT%TYPE;
+    NCOUNT_AUX      NUMBER;
+    NBRANCH_AUX     POLICY.NBRANCH%TYPE;
+    NPRODUCT_AUX    POLICY.NPRODUCT%TYPE;
+    NPOLICY_AUX     POLICY.NPOLICY%TYPE;
+    NCERTIF_AUX     CERTIFICAT.NCERTIF%TYPE;
+    NCURRENCY_AUX   EXCHANGE.NCURRENCY%TYPE;
+    SDOCUMENT_AUX   TMP_COLLECTION.SDOCUMENT%TYPE;
+    SCLIENT_AUX     DIR_DEBIT.SCLIENT%TYPE;
+    NTYPE_VALUECOLLECT_AUX   WAY_PAY_PROD.NTYPE_VALUECOLLECT%TYPE;
+    BADDCOLLECION            BOOLEAN DEFAULT FALSE;
+    SKEY_AUX        TMP_COLLECTION.SKEY%TYPE;
+
+/*+ PROCEDIMIENTO PARA DOMICILIACION CLIENTE */
+PROCEDURE INS_BANK_CLI(SCLIENT              PREMIUM.SCLIENT%TYPE          ,
+                       DEFFECDATE           DIR_DEBIT_CLI.DEFFECDATE%TYPE ,
+                       NWAY_PAY             PREMIUM.NWAY_PAY%TYPE         ,
+                       SACCOUNT      IN OUT DIR_DEBIT_CLI.SACCOUNT%TYPE   ,
+                       NBANKEXT      IN OUT DIR_DEBIT_CLI.NBANKEXT%TYPE   ,
+                       NTABLECREATE  IN OUT SMALLINT                      ) IS
+
+    CURSOR C_DIR_DEBIT_CLI(P_STYP_DIRDEB DIR_DEBIT_CLI.STYP_DIRDEB%TYPE) IS
+        SELECT SACCOUNT, NBANKEXT
+          FROM DIR_DEBIT_CLI
+         WHERE SCLIENT     = INS_BANK_CLI.SCLIENT
+           AND DEFFECDATE <= INS_BANK_CLI.DEFFECDATE
+           AND (DNULLDATE IS NULL
+            OR DNULLDATE   > INS_BANK_CLI.DEFFECDATE)
+           AND STYP_DIRDEB = P_STYP_DIRDEB;
+BEGIN
+    OPEN C_DIR_DEBIT_CLI(TO_CHAR(INS_BANK_CLI.NWAY_PAY));
+    FETCH C_DIR_DEBIT_CLI
+     INTO SACCOUNT, NBANKEXT;
+    IF C_DIR_DEBIT_CLI%NOTFOUND THEN
+        NTABLECREATE := 3;
+    ELSE
+        NTABLECREATE := 1;
+    END IF;
+    CLOSE C_DIR_DEBIT_CLI;
+
+EXCEPTION
+    WHEN TOO_MANY_ROWS THEN
+        NTABLECREATE := 3;
+    WHEN NO_DATA_FOUND THEN
+        NTABLECREATE := 3;
+    WHEN OTHERS THEN
+        RAISE;
+END INS_BANK_CLI;
+
+/*+ PROCEDIMIENTO PARA DOMICILIACION POR POLIZA */
+PROCEDURE INS_BANK_POL(SCERTYPE             PREMIUM.SCERTYPE%TYPE       ,
+                       NBRANCH              PREMIUM.NBRANCH%TYPE        ,
+                       NPRODUCT             PREMIUM.NPRODUCT%TYPE       ,
+                       NPOLICY              PREMIUM.NPOLICY%TYPE        ,
+                       NCERTIF              PREMIUM.NCERTIF%TYPE        ,
+                       DEFFECDATE           DIR_DEBIT.DEFFECDATE%TYPE   ,
+                       NWAY_PAY             PREMIUM.NWAY_PAY%TYPE       ,
+                       SACCOUNT      IN OUT DIR_DEBIT_CLI.SACCOUNT%TYPE ,
+                       NBANKEXT      IN OUT DIR_DEBIT_CLI.NBANKEXT%TYPE ,
+                       NTABLECREATE  IN OUT SMALLINT,
+                       SCLIENT       IN OUT DIR_DEBIT.SCLIENT%TYPE) IS
+
+    CURSOR C_DIR_DEBIT(P_STYP_DIRDEB DIR_DEBIT.STYP_DIRDEB%TYPE) IS
+        SELECT DECODE(INS_BANK_POL.NWAY_PAY, 2, SCREDI_CARD, SACCOUNT) SDOCUMENT,
+               NBANKEXT, SCLIENT
+          FROM DIR_DEBIT
+         WHERE SCERTYPE    = INS_BANK_POL.SCERTYPE
+           AND NBRANCH     = INS_BANK_POL.NBRANCH
+           AND NPRODUCT    = INS_BANK_POL.NPRODUCT
+           AND NPOLICY     = INS_BANK_POL.NPOLICY
+           AND NCERTIF     = INS_BANK_POL.NCERTIF
+           AND STYP_DIRDEB = P_STYP_DIRDEB
+           AND DEFFECDATE <= INS_BANK_POL.DEFFECDATE
+           AND (DNULLDATE IS NULL
+            OR DNULLDATE   > INS_BANK_POL.DEFFECDATE);
+BEGIN
+    OPEN C_DIR_DEBIT(TO_CHAR(INS_BANK_POL.NWAY_PAY));
+    FETCH C_DIR_DEBIT
+     INTO SACCOUNT, NBANKEXT,SCLIENT;
+    IF C_DIR_DEBIT%NOTFOUND THEN
+        NTABLECREATE := 3;
+    ELSE
+        NTABLECREATE := 1;
+    END IF;
+    CLOSE C_DIR_DEBIT;
+EXCEPTION
+    WHEN TOO_MANY_ROWS THEN
+        NTABLECREATE := 3;
+    WHEN NO_DATA_FOUND THEN
+        NTABLECREATE := 3;
+    WHEN OTHERS THEN
+        RAISE;
+END INS_BANK_POL;
+
+PROCEDURE INS_DCARDEXPIR(SCLIENT           PREMIUM.SCLIENT%TYPE       ,
+                         NBANKEXT          CRED_CARD.NBANKEXT%TYPE    ,
+                         SACCOUNT          CRED_CARD.SCREDI_CARD%TYPE ,
+                         DCARDEXPIR IN OUT CRED_CARD.DCARDEXPIR%TYPE  ) IS
+    CURSOR C_CRED_CARD IS
+        SELECT DCARDEXPIR
+          FROM CRED_CARD
+         WHERE CRED_CARD.SCLIENT     = INS_DCARDEXPIR.SCLIENT
+           AND CRED_CARD.NBANKEXT    = INS_DCARDEXPIR.NBANKEXT
+           AND CRED_CARD.SCREDI_CARD = INS_DCARDEXPIR.SACCOUNT;
+BEGIN
+    OPEN C_CRED_CARD;
+    FETCH C_CRED_CARD
+     INTO DCARDEXPIR;
+    IF C_CRED_CARD%NOTFOUND THEN
+        DCARDEXPIR := NULL;
+    END IF;
+    CLOSE C_CRED_CARD;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        DCARDEXPIR := NULL;
+END INS_DCARDEXPIR;
+
+/*+ RECUPERAR LA DIRECCION INDICADA EN LA POLIZA-CERTIFICADO */
+PROCEDURE INSFINDADDRESS(SCERTYPE            CERTIFICAT.SCERTYPE%TYPE  ,
+                         NBRANCH             CERTIFICAT.NBRANCH%TYPE   ,
+                         NPRODUCT            CERTIFICAT.NPRODUCT%TYPE  ,
+                         NPOLICY             CERTIFICAT.NPOLICY%TYPE   ,
+                         NCERTIF             CERTIFICAT.NCERTIF%TYPE   ,
+                         DEFFECDATE          ADDRESS.DEFFECDATE%TYPE   ,
+                         SCLIENT             CLIENT.SCLIENT%TYPE       ,
+                         NSENDADDR           CERTIFICAT.NSENDADDR%TYPE ,
+                         SKEYADDRESS  IN OUT ADDRESS.SKEYADDRESS%TYPE  ,
+                         NCOD_AGREE          PREMIUM.NCOD_AGREE%TYPE    ) AS
+
+    LSKEYADDRESS  ADDRESS.SKEYADDRESS%TYPE;
+
+BEGIN
+   
+    IF INSCOLLECTIONBATCH.NWAY_PAY = 3 THEN
+    
+        BEGIN
+            SELECT SKEYADDRESS
+              INTO LSKEYADDRESS
+              FROM ADDRESS
+             WHERE SRECTYPE   = '1'
+               AND NRECOWNER  = 14
+               AND NCOD_AGREE = INSFINDADDRESS.NCOD_AGREE;
+        EXCEPTION
+            WHEN OTHERS THEN
+                LSKEYADDRESS := NULL;
+        END;
+    
+    END IF;
+    
+    IF LSKEYADDRESS IS NULL THEN
+        BEGIN  
+            SELECT SKEYADDRESS
+              INTO LSKEYADDRESS
+              FROM ADDRESS
+             WHERE SCERTYPE = INSFINDADDRESS.SCERTYPE
+               AND NBRANCH  = INSFINDADDRESS.NBRANCH
+               AND NPRODUCT = INSFINDADDRESS.NPRODUCT
+               AND NPOLICY  = INSFINDADDRESS.NPOLICY
+               AND NCERTIF  = INSFINDADDRESS.NCERTIF
+               AND SINFOR   = '1'
+               AND DEFFECDATE  <= INSFINDADDRESS.DEFFECDATE
+               AND (DNULLDATE  IS NULL
+                OR DNULLDATE    > INSFINDADDRESS.DEFFECDATE)
+               AND ROWNUM = 1 ;
+        EXCEPTION
+            WHEN OTHERS THEN
+                BEGIN  
+                    SELECT SKEYADDRESS
+                      INTO LSKEYADDRESS
+                      FROM ADDRESS
+                     WHERE SCLIENT  = INSFINDADDRESS.SCLIENT
+                       AND SINFOR   = '1'
+                       AND DEFFECDATE  <= INSFINDADDRESS.DEFFECDATE
+                       AND (DNULLDATE  IS NULL
+                        OR DNULLDATE    > INSFINDADDRESS.DEFFECDATE)
+                       AND ROWNUM = 1 ;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        NULL; 
+                END;  
+        END; 
+        
+        IF LSKEYADDRESS IS NULL THEN
+    /*+ SI LA VIA DE PAGO ES CONVENIO */
+    /*+ SE OBTIENE LA DIRECCIÓN DE ENVÍO PARA LA COBRANZA DE CONVENIO, DEBE BUSCAR LA DIRECCIÓN ASOCIADA AL RUT INGRESADO EN EL CONVENIO, 
+        TOMANDO LA DIRECCIÓN DE ENVÍO SI ES QUE ESTA MARCADA EN ESE RUT, Y EN CASO QUE NO ESTE TOMAR LA COMERCIAL, SI TAMPOCO ESTA TOMAR LA PARTICULAR.*/
+            IF INSCOLLECTIONBATCH.NWAY_PAY = 3 THEN
+
+                /*+SE BUSCA LA DIRECCIÓN COMERCIAL*/
+                BEGIN  
+                    SELECT SKEYADDRESS
+                      INTO LSKEYADDRESS
+                      FROM ADDRESS
+                     WHERE SCLIENT  = INSFINDADDRESS.SCLIENT
+                       AND SRECTYPE = '1' 
+                       AND DEFFECDATE  <= INSFINDADDRESS.DEFFECDATE
+                       AND (DNULLDATE  IS NULL
+                        OR DNULLDATE    > INSFINDADDRESS.DEFFECDATE)
+                       AND ROWNUM = 1 ;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        /*+SE BUSCA LA DIRECCIÓN PARTICULAR*/
+                        BEGIN  
+                            SELECT SKEYADDRESS
+                              INTO LSKEYADDRESS
+                              FROM ADDRESS
+                             WHERE SCLIENT  = INSFINDADDRESS.SCLIENT
+                               AND SRECTYPE = '2' 
+                               AND DEFFECDATE  <= INSFINDADDRESS.DEFFECDATE
+                               AND (DNULLDATE  IS NULL
+                                OR DNULLDATE    > INSFINDADDRESS.DEFFECDATE)
+                               AND ROWNUM = 1 ;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                NULL; 
+                        END;  
+                END;  
+
+                /*+ SI TODO FALLA, SE ASUME LA COMERCIAL */
+                IF LSKEYADDRESS IS NULL THEN
+                    INSFINDADDRESS.LSKEYADDRESS := '1' || INSFINDADDRESS.SCLIENT;
+                END IF;
+            ELSE
+                INSFINDADDRESS.LSKEYADDRESS := '1' || INSFINDADDRESS.SCLIENT;
+            END IF;
+        
+        END IF;
+    END IF;
+    INSFINDADDRESS.SKEYADDRESS := INSFINDADDRESS.LSKEYADDRESS ;
+    
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE;
+END INSFINDADDRESS;
+
+PROCEDURE OPEN_AMOUNT_CLI(RC1 IN OUT REFCURSORPKG.RCT1) AS
+
+BEGIN
+    IF SOPTCURRENCY = '1' THEN
+        OPEN RC1 FOR
+            SELECT NBANK_CODE, NBULLETINS,            NCODE_AGREE,
+                   SCLIENT,    NORI_CURR "NCURRENCY", SUM(NORI_AMOUNT) "NAMOUNT"
+              FROM TMP_COLLECTION
+             WHERE SKEY          =  INSCOLLECTIONBATCH.SKEY
+               AND SCLIENT       =  SOLDCLIENT
+               AND NBULLETINS    IS NOT NULL
+             GROUP BY NBANK_CODE , NBULLETINS , NCODE_AGREE ,
+                      SCLIENT    , NORI_CURR;
+    ELSE
+        OPEN RC1 FOR
+            SELECT NBANK_CODE,  NBULLETINS,            NCODE_AGREE,
+                   SCLIENT,     NCURRENCY "NCURRENCY", SUM(NAMOUNT) "NAMOUNT"
+              FROM TMP_COLLECTION
+             WHERE SKEY          =  INSCOLLECTIONBATCH.SKEY
+               AND SCLIENT       =  SOLDCLIENT
+               AND NBULLETINS    IS NOT NULL
+             GROUP BY NBANK_CODE , NBULLETINS , NCODE_AGREE ,
+                      SCLIENT    , NCURRENCY;
+    END IF;
+END OPEN_AMOUNT_CLI;
+
+/*-----------------------------------------------------------*/
+/* PROCESO DE RECHAZO DE IMPUTACION POR ESTADO DEL BOLETIN   */
+/*-----------------------------------------------------------*/
+PROCEDURE INSREJECTIMPUTATION( NBULLETINS    BULLETINS.NBULLETINS%TYPE ,
+                               NBORDEREAUX   BULLETINS.NBORDEREAUX%TYPE ,
+                               NREJECTCAUSE  BULLETINS.NREJECTCAUSE%TYPE DEFAULT NULL,
+                               NAMOUNT       PREMIUM_MO.NAMOUNT%TYPE DEFAULT NULL) AS
+
+    NTRANSACTIO_AUX     MOVE_ACC.NTRANSAC%TYPE;
+    SROWID_AUX          ROWID;
+    NRECEIPTS_AUX       INTEGER;
+    BDATA_FOUND         BOOLEAN;
+    SDUMMY              VARCHAR2(255);
+
+    NBRANCH_AUX            PREMIUM.NBRANCH%TYPE;
+    SCLIENT_AUX            PREMIUM.SCLIENT%TYPE;
+    NPOLICY_AUX            PREMIUM.NPOLICY%TYPE;
+    NCERTIF_AUX            PREMIUM.NCERTIF%TYPE;
+    NBALANCE_AUX           PREMIUM.NBALANCE%TYPE;
+    NCURRENCY_AUX          PREMIUM.NCURRENCY%TYPE;
+    NPREMIUM_AUX           PREMIUM.NPREMIUM%TYPE;
+    NPRODUCT_AUX           PREMIUM.NPRODUCT%TYPE;
+    NRECEIPT_AUX           PREMIUM.NRECEIPT%TYPE;
+    NBORDEREAUX_AUX        COLFORMREF.NBORDEREAUX%TYPE;
+    NCOLLECTOR_AUX         PREMIUM.NCOLLECTOR%TYPE;
+    SPAY_FORM_AUX          PREMIUM_MO.SPAY_FORM%TYPE;
+    NSTATUS_PRE            PREMIUM.NSTATUS_PRE%TYPE;
+    CURSOR C_BULLETINS(P_NBANK BULLETINS.NBANK_CODE%TYPE) IS
+        SELECT BUL.NBULLETINS , BUL.NSTATUS   , BUL.SCLIENT     ,
+               BUL.NAMOUNT    , BUL.DPAYDATE  , BUL.NBORDEREAUX ,
+               BUL.NCURRENCY  , BUL.NEXCHANGE , BUL.ROWID       ,
+               BUL.NWAY_PAY
+          FROM BULLETINS BUL
+         WHERE NBULLETINS = INSREJECTIMPUTATION.NBULLETINS;
+
+    C_BUL    C_BULLETINS%ROWTYPE;
+
+/*- CURSOR PARA RECORRER LOS DETALLES DE UN BOLETIN. */
+    CURSOR C_BULLETINS_DET(P_NBULLETINS BULLETINS_DET.NBULLETINS%TYPE) IS
+        SELECT NID       , NCOLLECDOCTYP             , NCONTRAT   ,
+               NDRAFT    , NRECEIPT                  , NAMOUNTPAY ,
+               SCERTYPE  , NBRANCH                   , NPRODUCT   ,
+               NAMOUNT   , NVL(NPAYNUMBE,0) NPAYNUMBE, ROWID , NPREMIUM
+          FROM BULLETINS_DET
+         WHERE NBULLETINS    = P_NBULLETINS;
+
+
+BEGIN
+
+    OPEN C_BULLETINS ( NBULLETINS );
+    FETCH C_BULLETINS INTO C_BUL;
+    CLOSE C_BULLETINS;
+
+/*+VERIFICAR SI EL BOLETIN TIENE UN SOLO RECIBO */
+    BEGIN
+        SELECT COUNT(1)      , BDET.NBRANCH , BDET.NPRODUCT ,
+               PREM.NPOLICY  , PREM.NCERTIF , BDET.NRECEIPT
+          INTO NRECEIPTS_AUX , NBRANCH_AUX  , NPRODUCT_AUX  ,
+               NPOLICY_AUX   , NCERTIF_AUX  , NRECEIPT_AUX
+          FROM BULLETINS_DET BDET, PREMIUM  PREM
+         WHERE BDET.NBULLETINS = C_BUL.NBULLETINS
+           AND PREM.NRECEIPT   = BDET.NRECEIPT
+           AND PREM.NBRANCH    = BDET.NBRANCH
+           AND PREM.NPRODUCT   = BDET.NPRODUCT
+           AND PREM.NDIGIT     = 0
+           AND PREM.NPAYNUMBE  = BDET.NPAYNUMBE
+         GROUP BY BDET.NBRANCH , BDET.NPRODUCT ,
+                  PREM.NPOLICY , PREM.NCERTIF  ,
+                  BDET.NRECEIPT;
+    EXCEPTION
+        WHEN OTHERS THEN
+            NBRANCH_AUX  := NULL;
+            NPRODUCT_AUX := NULL;
+            NPOLICY_AUX  := NULL;
+    END;
+
+    IF NRECEIPTS_AUX > 1 THEN
+        NBRANCH_AUX  := NULL;
+        NPRODUCT_AUX := NULL;
+        NPOLICY_AUX  := NULL;
+        NCERTIF_AUX  := NULL;
+        NRECEIPT_AUX := NULL;
+    END IF;
+
+/*+ACTUALIZAR EL ESTADO DEL BOLLETIN (RECHAZADO) */
+    BEGIN
+        UPDATE BULLETINS
+           SET NSTATUS      = 3                          , --ANULADO
+               NREJECTCAUSE = NULL,
+               DCOMPDATE    = SYSDATE                    ,
+               NUSERCODE    = INSCOLLECTIONBATCH.NUSERCODE
+         WHERE NBULLETINS =  INSREJECTIMPUTATION.NBULLETINS;
+    EXCEPTION
+        WHEN OTHERS THEN
+            NULL;
+    END;
+
+/*+ SE CREA EL REGISTRO DE RECHAZO PARA EL REPORTE POR DOCUMENTO DEL BOLETIN */
+    FOR C_BDT IN C_BULLETINS_DET(NBULLETINS) LOOP
+
+/*+SE INICIALIZA ERROR DE DETALLE CON LO ENCONTRADO EN CABECERA*/
+        NCURRENCY_AUX   := 0;
+
+/*+ RECUPERAR VALORES DEL RECIBO */
+        BDATA_FOUND := FALSE;
+
+        IF NVL(C_BDT.NRECEIPT,0) > 0 THEN
+            BEGIN
+                SELECT PRE.NBRANCH  , PRE.SCLIENT  , PRE.NPOLICY   ,
+                       PRE.NCERTIF  , PRE.NBALANCE , PRE.NCURRENCY ,
+                       PRE.NPREMIUM , PRE.NPRODUCT , PRE.NCOLLECTOR,
+                       NSTATUS_PRE
+                  INTO NBRANCH_AUX  , SCLIENT_AUX  , NPOLICY_AUX   ,
+                       NCERTIF_AUX  , NBALANCE_AUX , NCURRENCY_AUX ,
+                       NPREMIUM_AUX , NPRODUCT_AUX , NCOLLECTOR_AUX,
+                       NSTATUS_PRE
+                  FROM PREMIUM PRE 
+                 WHERE PRE.SCERTYPE   = C_BDT.SCERTYPE
+                   AND PRE.NBRANCH    = C_BDT.NBRANCH
+                   AND PRE.NPRODUCT   = C_BDT.NPRODUCT
+                   AND PRE.NRECEIPT   = C_BDT.NRECEIPT
+                   AND PRE.NDIGIT     = 0
+                   AND PRE.NPAYNUMBE  = C_BDT.NPAYNUMBE;
+
+                BDATA_FOUND := TRUE;
+
+            EXCEPTION
+                WHEN OTHERS THEN
+                    NULL;
+            END;
+        END IF;
+
+/*+ REGISTRAR MOVIMIENTO DE RECHAZO SIEMPRE QUE EXISTA RECIBO */
+        IF BDATA_FOUND THEN
+        
+            IF NSTATUS_PRE NOT IN (2,5,9) THEN
+                INSPREMIUM_MO(NRECEIPT      => C_BDT.NRECEIPT  ,
+                              NPRODUCT      => NPRODUCT_AUX    ,
+                              NBRANCH       => NBRANCH_AUX     ,
+                              SCERTYPE      => C_BDT.SCERTYPE  ,
+                              NDIGIT        => 0               ,
+                              NPAYNUMBE     => C_BDT.NPAYNUMBE ,
+                              NTRANSAC      => NULL            ,
+                              NAMOUNT       => 0               ,
+                              NCARD_TYPE    => NULL            ,
+                              SAUX_ACCOUN   => NULL            ,
+                              NBALANCE      => C_BDT.NPREMIUM    ,
+                              NBANK_CODE    => NULL            ,
+                              NBORDEREAUX   => NULL            ,
+                              DCAR_DATEXP   => NULL            ,
+                              SCARD_NUM     => NULL            ,
+                              NCASH_MOV     => NULL            ,
+                              NCAUSE_AMEN   => NULL            ,
+                              SCESSICOI     => '2'             ,
+                              SCHANG_ACC    => NULL            ,
+                              NCURRENCY     => NCURRENCY_AUX   ,
+                              SDOCNUMBE     => NULL            ,
+                              SIND_REVER    => '2'             ,
+                              NINT_MORA     => 0               ,
+                              SINTERMEI     => NULL            ,
+                              NNULLCODE     => NULL            ,
+                              SPAY_FORM     => SPAY_FORM_AUX   ,
+                              DPOSTED       => NULL            ,
+                              NPREMIUM      => NPREMIUM_AUX    ,
+                              NRECEIPT_FA   => NULL            ,
+                              DSTATDATE     => TRUNC(SYSDATE)      ,
+                              SSTATISI      => '2'             ,
+                              NUSERCODE     => NUSERCODE       ,
+                              DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                              NTYPE         => 40              , -- 40) salida de cobranza (TABLE 6)
+                              NEXCHANGE     => C_BUL.NEXCHANGE   ,
+                              SINDASSOCPRO  => '2'             ,
+                              NPAYSOONDISC  => NULL            ,
+                              NBULLETINS    => C_BUL.NBULLETINS,
+                              NCASHNUM      => NULL            ,
+                              NBILLNUM      => NULL            ,
+                              SBILLTYPE     => NULL            ,
+                              NCOLLECTOR    => NCOLLECTOR_AUX  ,
+                              SINDCHEQUE    => NULL            ,
+                              NAMOUNT_LOC   => C_BDT.NAMOUNT,
+                              NPAYREJECT    => NVL(INSREJECTIMPUTATION.NREJECTCAUSE,103),
+                              NCOMMIT       => 2               );
+             END IF;
+             UPDATE PREMIUM PRE
+                SET NBULLETINS = NULL
+              WHERE PRE.SCERTYPE   = C_BDT.SCERTYPE
+                AND PRE.NBRANCH    = C_BDT.NBRANCH
+                AND PRE.NPRODUCT   = C_BDT.NPRODUCT
+                AND PRE.NRECEIPT   = C_BDT.NRECEIPT
+                AND PRE.NDIGIT     = 0
+                AND PRE.NPAYNUMBE  = C_BDT.NPAYNUMBE;
+
+        END IF;
+    END LOOP;      -- C_BDT IN C_BULLETINS_DET(C_BUL.NBULLETINS) */
+
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END INSREJECTIMPUTATION;
+
+
+/*-----------------------------------------------------------*/
+/* FUNCION QUE FORMATE EL NUMERO DE CUENTA*/
+/*-----------------------------------------------------------*/
+FUNCTION FORMATSDOCUMENT ( STYPE_BANKAGREE BANK_AGREE.STYPE_BANKAGREE%TYPE,
+                           NBANK          BANK_AGREE.NBANK%TYPE,
+                           SDOCUMENT      TMP_COLLECTION.SDOCUMENT%TYPE)
+                            RETURN  TMP_COLLECTION.SDOCUMENT%TYPE AS
+     NNUMDIGIT_AUX       BANK_AGREE.NNUMDIGIT%TYPE;
+BEGIN
+
+    BEGIN
+      SELECT NVL(NNUMDIGIT,10)
+        INTO NNUMDIGIT_AUX
+        FROM BANK_AGREE
+       WHERE STYPE_BANKAGREE = FORMATSDOCUMENT.STYPE_BANKAGREE
+         AND NBANK           = FORMATSDOCUMENT.NBANK;
+      EXCEPTION
+        WHEN OTHERS THEN
+        NNUMDIGIT_AUX  := 10;
+      END;
+   RETURN  LPAD(TO_CHAR(TRIM(SDOCUMENT)),NNUMDIGIT_AUX ,'0')    ;
+
+END;
+
+
+
+/*+ ****************************************************************
+/*+ **************                                     *************
+/*+  ************* BLOQUE PROCEDIMIENTO PRINCIPAL      *************
+/*+ **************                                     *************
+/*+ ****************************************************************/
+
+
+BEGIN
+    NBILL_DAY_P := TO_NUMBER(TO_CHAR(INSCOLLECTIONBATCH.DEXPIRDAT,'DD'));
+/*+ SE BORRA  ANULAR LOS BOLETINES Y GENERAR MOVIMIENTO DE SALIDA DE COBRANZA */
+
+/* SE ANULA LA COBRANZA ANTERIOR SI ES DEFINITIVO */ 
+    IF NVL(INSCOLLECTIONBATCH.STAKEOLD,'2') ='1' AND SOPTPROCESS = 2 THEN 
+    
+    /*+ SE BORRA LA COBRANZA  GENERADA PREVIAMENTE */
+        FOR R_REG IN (SELECT T.NBULLETINS , B.NSTATUS
+                         FROM TMP_COLLECTION T, BULLETINS B, CERTIFICAT C
+                        WHERE T.DCOLLEC_DATE   <= INSCOLLECTIONBATCH.DEXPIRDAT
+                         AND (T.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                            OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+                          AND T.NWAY_PAY        = INSCOLLECTIONBATCH.NWAY_PAY
+                          AND (T.NBANK_CODE     = INSCOLLECTIONBATCH.NBANK  OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                          AND (T.NCODE_AGREE    = INSCOLLECTIONBATCH.NCOD_AGREE  OR  NVL(INSCOLLECTIONBATCH.NCOD_AGREE,0) = 0)
+                          AND T.NBULLETINS      = B.NBULLETINS
+                          AND NSTATUS      NOT IN (2,3) -- DISTINTO DE COBRADO O ANULADO
+                          AND C.SCERTYPE = T.SCERTYPE
+                          AND C.NBRANCH  = T.NBRANCH
+                          AND C.NPRODUCT = T.NPRODUCT
+                          AND C.NPOLICY  = T.NPOLICY
+                          AND C.NCERTIF  = T.NCERTIF
+                          --AND C.NBILL_DAY = NBILL_DAY_P                                                    
+                     GROUP BY T.NBULLETINS , B.NSTATUS) LOOP
+
+            FOR R_REG_2 IN (SELECT T.NBULLETINS , B.NSTATUS , T.SKEY
+                         FROM TMP_COLLECTION T, BULLETINS B, CERTIFICAT C
+                        WHERE T.DCOLLEC_DATE   <= INSCOLLECTIONBATCH.DEXPIRDAT
+                         AND (T.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                            OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+                          AND T.NWAY_PAY        = INSCOLLECTIONBATCH.NWAY_PAY
+                          AND (T.NBANK_CODE     = INSCOLLECTIONBATCH.NBANK  OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                          AND (T.NCODE_AGREE    = INSCOLLECTIONBATCH.NCOD_AGREE  OR  NVL(INSCOLLECTIONBATCH.NCOD_AGREE,0) = 0)
+                          AND T.NBULLETINS      = B.NBULLETINS
+                          AND T.NBULLETINS = R_REG.NBULLETINS
+                          AND NSTATUS      NOT IN (2,3) -- DISTINTO DE COBRADO O ANULADO
+                          AND C.SCERTYPE = T.SCERTYPE
+                          AND C.NBRANCH  = T.NBRANCH
+                          AND C.NPRODUCT = T.NPRODUCT
+                          AND C.NPOLICY  = T.NPOLICY
+                          AND C.NCERTIF  = T.NCERTIF
+                          --AND C.NBILL_DAY = NBILL_DAY_P                                                    
+                     GROUP BY T.NBULLETINS , B.NSTATUS,T.SKEY) LOOP
+            
+                    DELETE TMP_COLLECTION
+                    WHERE SKEY = R_REG_2.SKEY
+                    AND NBULLETINS = R_REG.NBULLETINS;
+                
+            END LOOP;
+            IF R_REG.NSTATUS <> 5 THEN
+                INSREJECTIMPUTATION (NBULLETINS  => R_REG.NBULLETINS,
+                                     NBORDEREAUX => NULL);
+            ELSE
+                FOR R_1 IN ( SELECT SCERTYPE  , NBRANCH   , NPRODUCT,
+                                    NRECEIPT  , NPREMIUM  , NPAYNUMBE,
+                                    NEXCHANGE , NBALANCE  , ROWID NROWID,
+                                    NCURRENCY 
+                               FROM PREMIUM
+                               WHERE NBULLETINS = R_REG.NBULLETINS) LOOP
+                                     
+                    UPDATE PREMIUM
+                       SET NBULLETINS = NULL
+                     WHERE ROWID = R_1.NROWID;
+
+                    INSPREMIUM_MO(NRECEIPT      => R_1.NRECEIPT  ,
+                                  NPRODUCT      => R_1.NPRODUCT    ,
+                                  NBRANCH       => R_1.NBRANCH     ,
+                                  SCERTYPE      => R_1.SCERTYPE  ,
+                                  NDIGIT        => 0               ,
+                                  NPAYNUMBE     => R_1.NPAYNUMBE ,
+                                  NTRANSAC      => NULL            ,
+                                  NAMOUNT       => 0               ,
+                                  NCARD_TYPE    => NULL            ,
+                                  SAUX_ACCOUN   => NULL            ,
+                                  NBALANCE      => R_1.NBALANCE    ,
+                                  NBANK_CODE    => NULL            ,
+                                  NBORDEREAUX   => NULL            ,
+                                  DCAR_DATEXP   => NULL            ,
+                                  SCARD_NUM     => NULL            ,
+                                  NCASH_MOV     => NULL            ,
+                                  NCAUSE_AMEN   => NULL            ,
+                                  SCESSICOI     => '2'             ,
+                                  SCHANG_ACC    => NULL            ,
+                                  NCURRENCY     => R_1.NCURRENCY   ,
+                                  SDOCNUMBE     => NULL            ,
+                                  SIND_REVER    => '2'             ,
+                                  NINT_MORA     => 0               ,
+                                  SINTERMEI     => NULL            ,
+                                  NNULLCODE     => NULL            ,
+                                  SPAY_FORM     => NULL   ,
+                                  DPOSTED       => NULL            ,
+                                  NPREMIUM      => NULL    ,
+                                  NRECEIPT_FA   => NULL            ,
+                                  DSTATDATE     => TRUNC(SYSDATE)      ,
+                                  SSTATISI      => '2'             ,
+                                  NUSERCODE     => NUSERCODE       ,
+                                  DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                                  NTYPE         => 40              , -- 40) salida de cobranza (TABLE 6)
+                                  NEXCHANGE     => R_1.NEXCHANGE   ,
+                                  SINDASSOCPRO  => '2'             ,
+                                  NPAYSOONDISC  => NULL            ,
+                                  NBULLETINS    => R_REG.NBULLETINS,
+                                  NCASHNUM      => NULL            ,
+                                  NBILLNUM      => NULL            ,
+                                  SBILLTYPE     => NULL            ,
+                                  NCOLLECTOR    => NULL  ,
+                                  SINDCHEQUE    => NULL            ,
+                                  NPAYREJECT    => NULL,
+                                  NCOMMIT       => 2               );
+                END LOOP;
+            END IF;
+            
+            
+            
+        END LOOP;
+            
+        DELETE FROM COLLECT_GEN T
+         WHERE DCOLLEC_DATE = INSCOLLECTIONBATCH.DEXPIRDAT
+           AND (T.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+            OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+           AND NWAY_PAY     = INSCOLLECTIONBATCH.NWAY_PAY
+           AND (NCOD_AGREE       = INSCOLLECTIONBATCH.NCOD_AGREE  
+            OR  NVL(INSCOLLECTIONBATCH.NCOD_AGREE,0) = 0)
+           AND (NBANK       = INSCOLLECTIONBATCH.NBANK
+            OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+            AND EXISTS ( SELECT 1
+                            FROM CERTIFICAT C
+                           WHERE C.SCERTYPE IN ( '1','2')
+                              AND C.NBRANCH  = T.NBRANCH
+                              AND C.NPRODUCT = T.NPRODUCT
+                              AND C.NPOLICY  = T.NPOLICY
+                              AND C.NCERTIF  = T.NCERTIF
+                              AND C.NBILL_DAY = NBILL_DAY_P);
+
+    ELSE
+        BADDCOLLECION := TRUE;
+    END IF;
+    COMMIT;
+
+/*+ ESTADO POR VIA DE PAGO NWAY_PAY:4:BOLETIN */
+    DEXPIRDAT_AUX := TRUNC(DEXPIRDAT);
+    SEXPIRDAT_DD  := TO_CHAR(DEXPIRDAT,'DD');
+    DLASTEXPIRDAT := LAST_DAY(DEXPIRDAT);
+
+    SCERTYPE_OLD := NULL;
+    NBRANCH_OLD  := NULL;
+    NPRODUCT_OLD := NULL;
+    NPOLICY_OLD  := NULL;
+    NCERTIF_OLD  := NULL;
+    NCOUNT       := 0;
+/*+ SE INICIA EL CICLO PRINCIPAL POR RECIBOS  */
+    FOR PREMIUM_C1 IN REAPREMIUM_C1(1) LOOP
+    
+        SCERTYPE     := PREMIUM_C1.SCERTYPE;
+        NBRANCH      := PREMIUM_C1.NBRANCH;
+        NPRODUCT     := PREMIUM_C1.NPRODUCT;
+        NPOLICY      := PREMIUM_C1.NPOLICY;
+        NCERTIF      := PREMIUM_C1.NCERTIF;
+        NTRATYPEI    := PREMIUM_C1.NTRATYPEI;
+        DLIMITDATE   := PREMIUM_C1.DLIMITDATE;
+        DLIMITDATE_AUX := LAST_DAY(PREMIUM_C1.DLIMITDATE);
+        SMESSAGED    := '';
+
+        BCONTINUE := TRUE;
+
+        IF BCONTINUE THEN
+            BEGIN
+                SELECT NVL(SONERECEIPT,'2'), NVL(SLASTRECEIPT,'2'), NVL(NTYPE_VALUECOLLECT, 1)
+                  INTO STAKEOLD_AUX        , SLASTRECEIPT_AUX, NTYPE_VALUECOLLECT_AUX
+                  FROM WAY_PAY_PROD
+                 WHERE NBRANCH     = INSCOLLECTIONBATCH.NBRANCH
+                   AND NPRODUCT    = INSCOLLECTIONBATCH.NPRODUCT
+                   AND NWAY_PAY    = INSCOLLECTIONBATCH.NWAY_PAY
+                   AND DEFFECDATE <= INSCOLLECTIONBATCH.DEXPIRDAT
+                   AND(DNULLDATE  IS NULL
+                    OR DNULLDATE   > INSCOLLECTIONBATCH.DEXPIRDAT);
+            EXCEPTION
+               WHEN OTHERS THEN
+                   STAKEOLD_AUX     := '2';
+                   SLASTRECEIPT_AUX := '2';
+            END;
+
+            IF SCERTYPE = SCERTYPE_OLD AND
+               NBRANCH  = NBRANCH_OLD  AND
+               NPRODUCT = NPRODUCT_OLD AND
+               NPOLICY  = NPOLICY_OLD  AND
+               NCERTIF  = NCERTIF_OLD  THEN
+
+                NCOUNT  := NCOUNT + 1;
+
+                IF  NTRATYPEI=13 THEN
+                        --NCOUNT_TRATY:=NCOUNT_TRATY+1;
+                        NCOUNT_TRATY:=0;
+
+--                    IF (DLIMIT_TRATY = DLIMITDATE) THEN
+--                        NCOUNT_TRATY:=0;
+--                    ELSE
+--                        NCOUNT_TRATY:=NCOUNT_TRATY+1;
+
+--                        IF SPROCE_I='0' THEN
+--                            NCOUNT_TRATY:=0;
+--                            SPROCE_I    :='1';
+--                        END IF;
+--                    END IF;
+                ELSE
+                    IF SPROCE_P='0'THEN
+                        NCOUNT   := 0;
+                        SPROCE_P :='1';
+                    ELSE
+                      
+                        NCOUNT_TRATY:= NCOUNT_TRATY + 1;
+                    END IF;
+                END IF;
+            ELSE
+                NCOUNT:= 0;
+                NCOUNT_TRATY:=0;
+                DLIMIT_TRATY:= NULL;
+                NCOUNT_AUX  := 0 ; 
+
+    /*+SI ES INTERES POR  PRESTAMO, SE SETEA LOS INDICADORES PARA SABER QUE SE PROCESO PRIMERO*/
+                IF NTRATYPEI=13 THEN
+                    SPROCE_P:='0';
+                    SPROCE_I:='1';
+                ELSE
+                    SPROCE_P:='1';
+                    SPROCE_I:='0';
+                END IF;
+            END IF;
+
+    /*+SI ES INTERES POR  PRESTAMO, SE SETEA LA FECHA MAS ANTIGUA QUE ENCUENTRA*/
+
+            IF (NTRATYPEI=13) AND
+               (DLIMIT_TRATY IS NULL) THEN
+                DLIMIT_TRATY:=DLIMITDATE;
+            END IF;
+
+             IF ((((STAKEOLD_AUX     = '1' AND  NCOUNT_AUX     = 0              ) OR STAKEOLD_AUX     =  '2') AND    
+                ((SLASTRECEIPT_AUX = '1' AND  TO_CHAR(DEXPIRDAT_AUX,'YYYYMM')  = TO_CHAR(DLIMITDATE_AUX,'YYYYMM')) OR SLASTRECEIPT_AUX =  '2') and
+                NTRATYPEI<> 13 ) OR
+                ( NTRATYPEI=13 AND  NCOUNT_TRATY<1 )) OR PREMIUM_C1.SCERTYPE = '1' THEN 
+               
+                NTABLECREATE := 1;
+                SERROR := '';
+                DCARDEXPIR := NULL;
+                STOO_ROWCNT := 0;
+
+                IF (NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYTRANSBANK) AND 
+                   (NVL(PREMIUM_C1.SDOCUMENT,'0') = '0' OR 
+                   NVL(PREMIUM_C1.NBANK_CODE,0) = 0) THEN  /*NUEVA CONDICION*/
+                    
+                    IF PREMIUM_C1.SDIRIND = '1' THEN      -- DOMICILIACION POR CLIENTE   */
+                        INS_BANK_CLI(SCLIENT      => PREMIUM_C1.SCLIENT,
+                                     DEFFECDATE   => INSCOLLECTIONBATCH.DEXPIRDAT,
+                                     NWAY_PAY     => INSCOLLECTIONBATCH.NWAY_PAY,
+                                     SACCOUNT     => INSCOLLECTIONBATCH.SACCOUNT,
+                                     NBANKEXT     => INSCOLLECTIONBATCH.NBANKEXT,
+                                     NTABLECREATE => INSCOLLECTIONBATCH.NTABLECREATE);
+                    ELSE
+                        IF PREMIUM_C1.SDIRIND = '2' THEN  -- DOMICILIACION POR POLIZA   */
+                            SCLIENT_AUX     := PREMIUM_C1.SCLIENT;
+                            INS_BANK_POL(SCERTYPE     => PREMIUM_C1.SCERTYPE              ,
+                                         NBRANCH      => PREMIUM_C1.NBRANCH               ,
+                                         NPRODUCT     => PREMIUM_C1.NPRODUCT              ,
+                                         NPOLICY      => PREMIUM_C1.NPOLICY               ,
+                                         NCERTIF      => PREMIUM_C1.NCERTIF               ,
+                                         DEFFECDATE   => INSCOLLECTIONBATCH.DEXPIRDAT     ,
+                                         NWAY_PAY     => INSCOLLECTIONBATCH.NWAY_PAY      ,
+                                         SACCOUNT     => INSCOLLECTIONBATCH.SACCOUNT      ,
+                                         NBANKEXT     => INSCOLLECTIONBATCH.NBANKEXT      ,
+                                         NTABLECREATE => INSCOLLECTIONBATCH.NTABLECREATE,
+                                         SCLIENT      => SCLIENT_AUX);
+                        ELSE
+                            NTABLECREATE := 3;
+                            SMESSAGED := '.NO ESTA DOMICILIADO, NI POR POLIZA NI POR CLIENTE';
+                        END IF;
+                    END IF;
+
+                    IF NTABLECREATE = 1 THEN
+                        IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC AND
+                           NVL(NBANK,0) <> 0 THEN
+                            IF NVL(NBANK,0) <> NVL(NBANKEXT,0) THEN
+                                NTABLECREATE := 2;
+                                SMESSAGED := 'NO CORRESPONDE AL BANCO';
+                            END IF;
+                        END IF;
+                    END IF;
+
+                    IF NTABLECREATE = 1 AND
+                       NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                        INS_DCARDEXPIR(SCLIENT    => PREMIUM_C1.SCLIENT            ,
+                                       NBANKEXT   => INSCOLLECTIONBATCH.NBANKEXT   ,
+                                       SACCOUNT   => INSCOLLECTIONBATCH.SACCOUNT   ,
+                                       DCARDEXPIR => INSCOLLECTIONBATCH.DCARDEXPIR );
+                    END IF;
+                ELSE
+                
+                    SACCOUNT := PREMIUM_C1.SDOCUMENT;
+                    NBANKEXT := PREMIUM_C1.NBANK_CODE;
+                    
+                    IF NTABLECREATE = 1 THEN
+                    
+                    /*+SE VALIDA CONTRA EL BANCO DEL RECIBO*/
+                        IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC AND
+                           NVL(NBANK,0) <> 0 THEN
+                            IF NVL(NBANK,0) <> NVL(PREMIUM_C1.NBANK_CODE,0) THEN
+                                NTABLECREATE := 2;
+                                SMESSAGED := 'NO CORRESPONDE AL BANCO';
+                            END IF;
+                        END IF;
+                    END IF;
+
+                    IF NTABLECREATE = 1 AND
+                       NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                        INS_DCARDEXPIR(SCLIENT    => PREMIUM_C1.SCLIENT            ,
+                                       NBANKEXT   => PREMIUM_C1.NBANK_CODE   ,
+                                       SACCOUNT   => PREMIUM_C1.SDOCUMENT   ,
+                                       DCARDEXPIR => INSCOLLECTIONBATCH.DCARDEXPIR );
+                    END IF;
+                END IF;
+
+                IF NTABLECREATE = 1 THEN -- ****************************
+
+                    BPOLICY := NVL(PREMIUM_C1.SCERTYPE,'0') = '2';
+
+    /*+ RECUPERAR LA DIRECCCION DE LA POLIZA */
+                    INSFINDADDRESS(SCERTYPE    => PREMIUM_C1.SCERTYPE            ,
+                                   NBRANCH     => PREMIUM_C1.NBRANCH             ,
+                                   NPRODUCT    => PREMIUM_C1.NPRODUCT            ,
+                                   NPOLICY     => PREMIUM_C1.NPOLICY             ,
+                                   NCERTIF     => PREMIUM_C1.NCERTIF             ,
+                                   DEFFECDATE  => PREMIUM_C1.DEFFECDATE          ,
+                                   SCLIENT     => PREMIUM_C1.SCLIENT             ,
+                                   NSENDADDR   => PREMIUM_C1.NSENDADDR           ,
+                                   SKEYADDRESS => INSCOLLECTIONBATCH.SKEYADDRESS ,
+                                   NCOD_AGREE  => PREMIUM_C1.NCOD_AGREE         );
+
+    /*+ SI VIA DE PAGO ES PLANILLA Y SE INGRESA CODIGO DE CONVENIO SE FILTRA */
+                    IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYBRIEF  AND
+                       NVL(PREMIUM_C1.NCOD_AGREE,0) = 0 THEN
+                        NTABLECREATE := 2;
+                        SMESSAGED := 'RECIBO NO TIENE EL CODIGO DE CONVENIO';
+                    END IF;
+
+                    IF NOT BPOLICY THEN
+                        NTABLECREATE := 1;
+                    END IF;
+
+    /*+ SI LA VIA DE PAGO ES AFP/INP, EL CLIENTE CORRESPONDE A EL PAGADOR DE LA POLIZA */
+                    IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYAFP_INP THEN
+                        BEGIN
+                            SELECT SCLIENT
+                              INTO SCLIENTPAY
+                              FROM ROLES
+                             WHERE SCERTYPE    = PREMIUM_C1.SCERTYPE
+                               AND NBRANCH     = PREMIUM_C1.NBRANCH
+                               AND NPRODUCT    = PREMIUM_C1.NPRODUCT
+                               AND NPOLICY     = PREMIUM_C1.NPOLICY
+                               AND NCERTIF     = PREMIUM_C1.NCERTIF
+                               AND NROLE       = 25
+                               AND DEFFECDATE <= INSCOLLECTIONBATCH.DEXPIRDAT
+                               AND (DNULLDATE IS NULL
+                                OR  DNULLDATE  > INSCOLLECTIONBATCH.DEXPIRDAT);
+                        EXCEPTION
+                            WHEN NO_DATA_FOUND THEN
+                                NTABLECREATE := 2;
+                        END;
+                    ELSE
+                        SCLIENTPAY := PREMIUM_C1.SCLIENT;
+                    END IF;
+
+                    IF NTABLECREATE = 1 THEN
+
+    /*+ SOPTCURRENCY : MONEDA DE LA GENERACION 1.ORIGEN 2.LOCAL */
+                        IF PREMIUM_C1.NCURRENCY <> 1 AND SOPTCURRENCY != '1' THEN
+                            NEXCHANGE := NULL;
+                            DINCREASE_AUX := NVL(DINCREASE_AUX,DINCREASE);
+                          --Para validar si se revaloriza segun Vigencia/Renovación o por valorización del proceso
+                            IF (PREMIUM_C1.NPAYFREQ = 6 AND NVL(PREMIUM_C1.NEXCHANGE_UNIQUE,0) <> 0) OR NVL(NTYPE_VALUECOLLECT_AUX,1) = 2 THEN 
+                                IF NVL(NTYPE_VALUECOLLECT_AUX,1) = 2 THEN
+                                    PREMIUM_C1.NEXCHANGE_UNIQUE := REAGENERALPKG.REAEXCHANGELOCAL(PREMIUM_C1.NCURRENCY,PREMIUM_C1.DSTARTDATE);
+                                END IF;
+                                DINCREASE_AUX := PREMIUM_C1.DSTARTDATE;
+                                NAMOUNT     := ROUND(NVL(PREMIUM_C1.NEXCHANGE_UNIQUE,0)* PREMIUM_C1.NBALANCE);
+                                NEXCHANGE   := PREMIUM_C1.NEXCHANGE_UNIQUE;
+
+                            ELSE
+                                INSCALCONVERTEXCHANGE2(PARAMNEXCHANGE  => NEXCHANGE            ,
+                                                       PARAMNAMOUNT    => PREMIUM_C1.NBALANCE  ,
+                                                       PARAMNCURORI    => PREMIUM_C1.NCURRENCY ,
+                                                       PARAMNCURDES    => 1                    ,
+                                                       PARAMSEFFECDATE => DINCREASE_AUX            ,
+                                                       PARAMNRESULT    => NAMOUNT              );
+                            END IF; 
+
+                            NCURRENCY   := 1;
+                            NAMOUNT     := ROUND(NAMOUNT);
+                        ELSE
+                        
+                            NEXCHANGE       := NULL;
+                            DINCREASE_AUX   := INSCOLLECTIONBATCH.DINCREASE;
+                            NCURRENCY       := PREMIUM_C1.NCURRENCY;
+                            NAMOUNT         := PREMIUM_C1.NBALANCE;
+                        END IF;
+
+                        NORI_AMOUNT   :=  PREMIUM_C1.NBALANCE;
+
+                        IF NVL(PREMIUM_C1.NDIGITPOL,0) < 0 THEN
+                            SDIGIT_AUX := 'K';
+                        ELSE
+                            SDIGIT_AUX := TRIM(TO_CHAR(PREMIUM_C1.NDIGITPOL));
+                        END IF;
+
+                        BEGIN
+                            INSERT INTO TMP_COLLECTION(NBULLETINS            , NINSUR_AREA            , NWAY_PAY              ,
+                                                       NAMOUNT               , SCLIENT                , NBANK_CODE            ,
+                                                       SDOCUMENT             , NCONTRAT               , NDRAFT                ,
+                                                       SCERTYPE              , NBRANCH                , NPRODUCT              ,
+                                                       NRECEIPT              , NCURRENCY              , NCODE_AGREE           ,
+                                                       DCOMPDATE             , NUSERCODE              , SKEYADDRESS           ,
+                                                       DLIMIT_DATE           , NPOLICY                , NCERTIF               ,
+                                                       SERROR                , NTRATYPEI              , DEFFECDATE            ,
+                                                       DNULLDATE             , NPREMIUM               , SKEY                  ,
+                                                       NDIGIT                , NPAYNUMBE              , DCARDEXPIR            ,
+                                                       SCLIENTPAY            , NTYPE                  , SDIGIPOL              ,
+                                                       NORI_CURR             , NORI_AMOUNT            , DCOLLEC_DATE          ,
+                                                       DVALUEDATE            , SOPTPROCESS            , SOPTCURRENCY          ,
+                                                       SCLIENAME_SPON        , SCLIENT_SPON)
+                                                VALUES(PREMIUM_C1.NBULLETINS , PREMIUM_C1.NINSUR_AREA , NWAY_PAY              ,
+                                                       NAMOUNT               , PREMIUM_C1.SCLIENT     , NBANKEXT              ,
+                                                       SACCOUNT              , PREMIUM_C1.NCONTRAT    , PREMIUM_C1.NDRAFT     ,
+                                                       PREMIUM_C1.SCERTYPE   , PREMIUM_C1.NBRANCH     , PREMIUM_C1.NPRODUCT   ,
+                                                       PREMIUM_C1.NRECEIPT   , NCURRENCY              , PREMIUM_C1.NCOD_AGREE ,
+                                                       SYSDATE               , NUSERCODE              , NVL(SKEYADDRESS,'0')  ,
+                                                       PREMIUM_C1.DLIMITDATE , PREMIUM_C1.NPOLICY     , PREMIUM_C1.NCERTIF    ,
+                                                       ''                    , PREMIUM_C1.NTRATYPEI   , PREMIUM_C1.DEFFECDATE ,
+                                                       PREMIUM_C1.DEXPIRDAT  , PREMIUM_C1.NAMOUNT     , SKEY                  ,
+                                                       PREMIUM_C1.NDIGIT     , PREMIUM_C1.NPAYNUMBE   , DCARDEXPIR            ,
+                                                       SCLIENTPAY            , PREMIUM_C1.NTYPE       , SDIGIT_AUX            ,
+                                                       PREMIUM_C1.NCURRENCY  , NORI_AMOUNT            , DEXPIRDAT             ,
+                                                       DINCREASE_AUX         , INSCOLLECTIONBATCH.SOPTPROCESS, INSCOLLECTIONBATCH.SOPTCURRENCY,
+                                                       REAGENERALPKG.REANAMECLI( PREMIUM_C1.SCLIENTSPONSOR),   PREMIUM_C1.SCLIENTSPONSOR);
+
+                            SPROCESS:='1';
+                            IF NTRATYPEI<>13 THEN
+                                NCOUNT_AUX := NCOUNT_AUX + 1 ;
+                            END IF;     
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                 RAISE;
+                        END;
+                    ELSE 
+                      CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => PREMIUM_C1.SCLIENT                              ,
+                                         NBRANCH       => PREMIUM_C1.NBRANCH                              ,
+                                         NPOLICY       => PREMIUM_C1.NPOLICY                           ,
+                                         NCERTIF       => PREMIUM_C1.NCERTIF                           ,
+                                         NRECEIPT      => PREMIUM_C1.NRECEIPT                              ,
+                                         SERROR        => 'RECIBO NO INCLUIDO EN LA COBRANZA.'|| SMESSAGED,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );
+
+                    END IF;
+                ELSE
+                    --IF NVL(SMESSAGED,'*') <> 'NO CORRESPONDE AL BANCO' THEN
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => PREMIUM_C1.SCLIENT                              ,
+                                         NBRANCH       => PREMIUM_C1.NBRANCH                              ,
+                                         NPOLICY       => PREMIUM_C1.NPOLICY                           ,
+                                         NCERTIF       => PREMIUM_C1.NCERTIF                           ,
+                                         NRECEIPT      => PREMIUM_C1.NRECEIPT                              ,
+                                         SERROR        => 'RECIBO NO INCLUIDO EN LA COBRANZA POR NO ENCONTRAR CUENTA O TARJETA,' || SMESSAGED,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );
+                    --END IF;                
+                END IF;
+
+            ELSE
+            /*EN CASO QUE EL RECIBO NO SELA A COBRANZA SE inserta unr egistro en la tabla temporal */
+              CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                             NBANK         => NBANK                                          ,
+                             NCURRENCY     => NCURRENCY                                      ,
+                             SCLIENT       => PREMIUM_C1.SCLIENT                              ,
+                             NBRANCH       => PREMIUM_C1.NBRANCH                              ,
+                             NPOLICY       => PREMIUM_C1.NPOLICY                           ,
+                             NCERTIF       => PREMIUM_C1.NCERTIF                           ,
+                             NRECEIPT      => PREMIUM_C1.NRECEIPT                              ,
+                             SERROR        => 'RECIBO NO INCLUIDO EN LA COBRANZA POR REGLA DE MAS ANTIGUO O PERIODO'                                          ,
+                             DCOMPDATE     => SYSDATE                                         ,
+                             NUSERCODE     => NUSERCODE                                       ,
+                             SACCOUNT      => NULL                                            ,
+                             SKEY          => SKEY                                            ,
+                             NWAY_PAY      => NWAY_PAY                                        ,
+                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                             NBULLETINS    => NBULLETINS                                      ,
+                             NCOLLECDOCTYP => 0                                               ,
+                             NBORDEREAUX   => NULL                                            ,
+                             NCONTRAT      => 0                                               ,
+                             NDRAFT        => NULL                                            );
+            
+            END IF;   -- **********************************
+        END IF;
+        SCERTYPE_OLD   := SCERTYPE;
+        NBRANCH_OLD    := NBRANCH;
+        NPRODUCT_OLD   := NPRODUCT;
+        NPOLICY_OLD    := NPOLICY;
+        NCERTIF_OLD    := NCERTIF;
+        DLIMITDATE_OLD := DLIMITDATE;
+
+        COMMIT;
+
+    END LOOP;
+
+
+/*+ SE INICIA EL CICLO PRINCIPAL POR CUOTAS  */
+    FOR PREMIUM_C1 IN REAPREMIUM_C2 LOOP
+        SCERTYPE     := PREMIUM_C1.SCERTYPE;
+        NBRANCH      := PREMIUM_C1.NBRANCH;
+        NPRODUCT     := PREMIUM_C1.NPRODUCT;
+        NPOLICY      := PREMIUM_C1.NPOLICY;
+        NCERTIF      := PREMIUM_C1.NCERTIF;
+        NTRATYPEI    := PREMIUM_C1.NTRATYPEI;
+        DLIMITDATE   := PREMIUM_C1.DLIMITDATE;
+        DLIMITDATE_AUX := LAST_DAY(PREMIUM_C1.DLIMITDATE);
+
+        BEGIN
+            SELECT NVL(SONERECEIPT,'2'), NVL(SLASTRECEIPT,'2')
+              INTO STAKEOLD_AUX        , SLASTRECEIPT_AUX
+              FROM WAY_PAY_PROD
+             WHERE NBRANCH     = INSCOLLECTIONBATCH.NBRANCH
+               AND NPRODUCT    = INSCOLLECTIONBATCH.NPRODUCT
+               AND NWAY_PAY    = INSCOLLECTIONBATCH.NWAY_PAY
+               AND DEFFECDATE <= INSCOLLECTIONBATCH.DEXPIRDAT
+               AND(DNULLDATE  IS NULL
+                OR DNULLDATE   > INSCOLLECTIONBATCH.DEXPIRDAT);
+        EXCEPTION
+           WHEN OTHERS THEN
+               STAKEOLD_AUX     := '2';
+               SLASTRECEIPT_AUX := '2';
+        END;
+
+        IF SCERTYPE = SCERTYPE_OLD AND
+            NBRANCH  = NBRANCH_OLD  AND
+            NPRODUCT = NPRODUCT_OLD AND
+            NPOLICY  = NPOLICY_OLD  AND
+            NCERTIF  = NCERTIF_OLD  THEN
+
+            NCOUNT   := NCOUNT + 1;
+
+            IF  NTRATYPEI=13 THEN
+                IF (DLIMIT_TRATY = DLIMITDATE) THEN
+                    NCOUNT_TRATY:=0;
+                ELSE
+                     NCOUNT_TRATY:=NCOUNT_TRATY+1;
+                    IF SPROCE_I='0' THEN
+                       NCOUNT_TRATY:=0;
+                       SPROCE_I    :='1';
+                    END IF;
+                END IF;
+            ELSE
+                IF SPROCE_P='0'THEN
+                   NCOUNT   := 0;
+                   SPROCE_P :='1';
+                ELSE
+                   NCOUNT_TRATY:= NCOUNT_TRATY + 1;
+                END IF;
+            END IF;
+        ELSE
+            NCOUNT:= 0;
+            NCOUNT_TRATY:=0;
+            DLIMIT_TRATY:= NULL;
+            NCOUNT_AUX  := 0 ; 
+
+        /*+SI ES INTERES POR  PRESTAMO, SE SETEA LOS INDICADORES PARA SABER QUE SE PROCESO PRIMERO*/
+
+            IF NTRATYPEI=13 THEN
+               SPROCE_P:='0';
+               SPROCE_I:='1';
+            ELSE
+               SPROCE_P:='1';
+               SPROCE_I:='0';
+            END IF;
+        END IF;
+
+/*+SI ES INTERES POR  PRESTAMO, SE SETEA LA FECHA MAS ANTIGUA QUE ENCUENTRA*/
+
+        IF (NTRATYPEI=13)  AND
+           (DLIMIT_TRATY IS NULL) THEN
+           DLIMIT_TRATY:=DLIMITDATE;
+        END IF;
+
+        IF ((STAKEOLD_AUX      = '1' AND  NCOUNT_AUX     = 0              ) OR STAKEOLD_AUX     =  '2') AND    
+            ((SLASTRECEIPT_AUX = '1' AND  DEXPIRDAT_AUX  = DLIMITDATE_AUX ) OR SLASTRECEIPT_AUX =  '2') THEN 
+
+            NTABLECREATE := 1;
+            SERROR := '';
+            DCARDEXPIR := NULL;
+            STOO_ROWCNT := 0;
+
+            IF (NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYTRANSBANK) AND 
+                   (NVL(PREMIUM_C1.SDOCUMENT,'0') = '0' OR 
+                   NVL(PREMIUM_C1.NBANK_CODE,0) = 0) THEN  /*NUEVA CONDICION*/
+                IF PREMIUM_C1.SDIRIND = '1' THEN      -- DOMICILIACION POR CLIENTE   */
+                    INS_BANK_CLI(SCLIENT      => PREMIUM_C1.SCLIENT,
+                                 DEFFECDATE   => INSCOLLECTIONBATCH.DEXPIRDAT,
+                                 NWAY_PAY     => INSCOLLECTIONBATCH.NWAY_PAY,
+                                 SACCOUNT     => INSCOLLECTIONBATCH.SACCOUNT,
+                                 NBANKEXT     => INSCOLLECTIONBATCH.NBANKEXT,
+                                 NTABLECREATE => INSCOLLECTIONBATCH.NTABLECREATE);
+                ELSE
+                    IF PREMIUM_C1.SDIRIND = '2' THEN  -- DOMICILIACION POR POLIZA   */
+                        SCLIENT_AUX     := PREMIUM_C1.SCLIENT;
+                        INS_BANK_POL(SCERTYPE     => PREMIUM_C1.SCERTYPE              ,
+                                     NBRANCH      => PREMIUM_C1.NBRANCH               ,
+                                     NPRODUCT     => PREMIUM_C1.NPRODUCT              ,
+                                     NPOLICY      => PREMIUM_C1.NPOLICY               ,
+                                     NCERTIF      => PREMIUM_C1.NCERTIF               ,
+                                     DEFFECDATE   => INSCOLLECTIONBATCH.DEXPIRDAT     ,
+                                     NWAY_PAY     => INSCOLLECTIONBATCH.NWAY_PAY      ,
+                                     SACCOUNT     => INSCOLLECTIONBATCH.SACCOUNT      ,
+                                     NBANKEXT     => INSCOLLECTIONBATCH.NBANKEXT      ,
+                                     NTABLECREATE => INSCOLLECTIONBATCH.NTABLECREATE,
+                                     SCLIENT      => SCLIENT_AUX);
+                    ELSE
+                        NTABLECREATE := 3;
+                    END IF;
+                END IF;
+
+                IF NTABLECREATE = 1 THEN
+                    IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC AND
+                       NVL(NBANK,0) <> 0 THEN
+                        IF NVL(NBANK,0) <> NVL(NBANKEXT,0) THEN
+                            NTABLECREATE := 2;
+                        END IF;
+                    END IF;
+                END IF;
+
+                IF NTABLECREATE = 1 AND
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                    INS_DCARDEXPIR(SCLIENT    => PREMIUM_C1.SCLIENT            ,
+                                   NBANKEXT   => INSCOLLECTIONBATCH.NBANKEXT   ,
+                                   SACCOUNT   => INSCOLLECTIONBATCH.SACCOUNT   ,
+                                   DCARDEXPIR => INSCOLLECTIONBATCH.DCARDEXPIR );
+                END IF;
+            ELSE
+                IF NTABLECREATE = 1 THEN
+                    IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYPAC AND
+                       NVL(NBANK,0) <> 0 THEN
+                        IF NVL(NBANK,0) <> NVL(NBANKEXT,0) THEN
+                            NTABLECREATE := 2;
+                        END IF;
+                    END IF;
+                END IF;
+
+                IF NTABLECREATE = 1 AND
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                    INS_DCARDEXPIR(SCLIENT    => PREMIUM_C1.SCLIENT            ,
+                                   NBANKEXT   => INSCOLLECTIONBATCH.NBANKEXT   ,
+                                   SACCOUNT   => INSCOLLECTIONBATCH.SACCOUNT   ,
+                                   DCARDEXPIR => INSCOLLECTIONBATCH.DCARDEXPIR );
+                END IF;
+            
+            END IF;
+
+            IF NTABLECREATE = 1 THEN -- ****************************
+
+                BPOLICY := NVL(PREMIUM_C1.SCERTYPE, '0') = '2';
+
+/*+ RECUPERAR LA DIRECCCION DE LA POLIZA */
+                INSFINDADDRESS(SCERTYPE    => PREMIUM_C1.SCERTYPE            ,
+                               NBRANCH     => PREMIUM_C1.NBRANCH             ,
+                               NPRODUCT    => PREMIUM_C1.NPRODUCT            ,
+                               NPOLICY     => PREMIUM_C1.NPOLICY             ,
+                               NCERTIF     => PREMIUM_C1.NCERTIF             ,
+                               DEFFECDATE  => PREMIUM_C1.DEFFECDATE          ,
+                               SCLIENT     => PREMIUM_C1.SCLIENT             ,
+                               NSENDADDR   => PREMIUM_C1.NSENDADDR           ,
+                               SKEYADDRESS => INSCOLLECTIONBATCH.SKEYADDRESS ,
+                               NCOD_AGREE  => PREMIUM_C1.NCOD_AGREE         );
+
+/*+ SI VIA DE PAGO ES PLANILLA Y SE INGRESA CODIGO DE CONVENIO SE FILTRA */
+                IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYBRIEF  AND
+                   NVL(PREMIUM_C1.NCOD_AGREE,0) = 0 THEN
+                    NTABLECREATE := 2;
+                END IF;
+
+                IF NOT BPOLICY THEN
+                    NTABLECREATE := 1;
+                END IF;
+
+/*+ SI LA VIA DE PAGO ES AFP/INP, EL CLIENTE CORRESPONDE A EL PAGADOR DE LA POLIZA */
+                IF NVL(NWAY_PAY,0) = INSGENERALPKG.EWAYPAYBYAFP_INP THEN
+                    BEGIN
+                        SELECT SCLIENT
+                          INTO SCLIENTPAY
+                          FROM ROLES
+                         WHERE SCERTYPE    = PREMIUM_C1.SCERTYPE
+                           AND NBRANCH     = PREMIUM_C1.NBRANCH
+                           AND NPRODUCT    = PREMIUM_C1.NPRODUCT
+                           AND NPOLICY     = PREMIUM_C1.NPOLICY
+                           AND NCERTIF     = PREMIUM_C1.NCERTIF
+                           AND NROLE       = 25
+                           AND DEFFECDATE <= INSCOLLECTIONBATCH.DEXPIRDAT
+                           AND (DNULLDATE IS NULL
+                            OR  DNULLDATE  > INSCOLLECTIONBATCH.DEXPIRDAT);
+                    EXCEPTION
+                        WHEN NO_DATA_FOUND THEN
+                            NTABLECREATE := 2;
+                    END;
+                ELSE
+                    SCLIENTPAY := PREMIUM_C1.SCLIENT;
+                END IF;
+
+                IF NTABLECREATE = 1 THEN
+
+/*+ SOPTCURRENCY : MONEDA DE LA GENERACION 1.ORIGEN 2.LOCAL    */
+                    IF PREMIUM_C1.NCURRENCY <> 1 AND SOPTCURRENCY != '1' THEN
+
+/*+MANTIENE LA ÚLTIMA FECHA DE VALORIZACIÓN UTILIZADA EN EL BOLETEN ANTERIOR MAS ANTIGUO*/
+
+                        DINCREASE_AUX := NVL(DINCREASE_AUX,DINCREASE);
+
+                        NEXCHANGE := NULL;
+                        IF PREMIUM_C1.NPAYFREQ = 6 AND NVL(PREMIUM_C1.NEXCHANGE_UNIQUE,0) <> 0 THEN
+                            DINCREASE_AUX := PREMIUM_C1.DSTARTDATE;
+                            NAMOUNT := ROUND(NVL(PREMIUM_C1.NEXCHANGE_UNIQUE,0)* PREMIUM_C1.NAMOUNT);
+                            NEXCHANGE := PREMIUM_C1.NEXCHANGE_UNIQUE;
+                        ELSE
+                            INSCALCONVERTEXCHANGE2(PARAMNEXCHANGE  => NEXCHANGE            ,
+                                                   PARAMNAMOUNT    => PREMIUM_C1.NAMOUNT   ,
+                                                   PARAMNCURORI    => PREMIUM_C1.NCURRENCY ,
+                                                   PARAMNCURDES    => 1                    ,
+                                                   PARAMSEFFECDATE => DINCREASE_AUX            ,
+                                                   PARAMNRESULT    => NAMOUNT              );
+                        END IF;                                                       
+
+                        NCURRENCY := 1;
+                    ELSE
+                        DINCREASE_AUX   := INSCOLLECTIONBATCH.DINCREASE;
+                        NEXCHANGE       := NULL;
+                        NCURRENCY       := PREMIUM_C1.NCURRENCY;
+                        NAMOUNT         := PREMIUM_C1.NAMOUNT;
+                    END IF;
+
+                    NORI_AMOUNT   :=  PREMIUM_C1.NAMOUNT;
+
+                    IF NVL(PREMIUM_C1.NDIGITPOL,0) < 0 THEN
+                        SDIGIT_AUX := 'K';
+                    ELSE
+                        SDIGIT_AUX := TRIM(TO_CHAR(PREMIUM_C1.NDIGITPOL));
+                    END IF;
+
+                    BEGIN
+                        INSERT INTO TMP_COLLECTION(NBULLETINS            , NINSUR_AREA            , NWAY_PAY              ,
+                                                   NAMOUNT               , SCLIENT                , NBANK_CODE            ,
+                                                   SDOCUMENT             , NCONTRAT               , NDRAFT                ,
+                                                   SCERTYPE              , NBRANCH                , NPRODUCT              ,
+                                                   NRECEIPT              , NCURRENCY              , NCODE_AGREE           ,
+                                                   DCOMPDATE             , NUSERCODE              , SKEYADDRESS           ,
+                                                   DLIMIT_DATE           , NPOLICY                , NCERTIF               ,
+                                                   SERROR                , NTRATYPEI              , DEFFECDATE            ,
+                                                   DNULLDATE             , NPREMIUM               , SKEY                  ,
+                                                   NDIGIT                , NPAYNUMBE              , DCARDEXPIR            ,
+                                                   SCLIENTPAY            , NTYPE                  , SDIGIPOL              ,
+                                                   NORI_CURR             , NORI_AMOUNT            , DCOLLEC_DATE          ,
+                                                   DVALUEDATE            , SOPTPROCESS            , SOPTCURRENCY          ,
+                                                   SCLIENAME_SPON        , SCLIENT_SPON)
+                                            VALUES(PREMIUM_C1.NBULLETINS , PREMIUM_C1.NINSUR_AREA , NWAY_PAY              ,
+                                                   ROUND(NAMOUNT)        , PREMIUM_C1.SCLIENT     , NBANKEXT              ,
+                                                   SACCOUNT              , PREMIUM_C1.NCONTRAT    , PREMIUM_C1.NDRAFT     ,
+                                                   PREMIUM_C1.SCERTYPE   , PREMIUM_C1.NBRANCH     , PREMIUM_C1.NPRODUCT   ,
+                                                   PREMIUM_C1.NRECEIPT   , NCURRENCY              , PREMIUM_C1.NCOD_AGREE ,
+                                                   SYSDATE               , NUSERCODE              , NVL(SKEYADDRESS,'0')  ,
+                                                   PREMIUM_C1.DLIMITDATE , PREMIUM_C1.NPOLICY     , PREMIUM_C1.NCERTIF    ,
+                                                   ''                    , PREMIUM_C1.NTRATYPEI   , PREMIUM_C1.DEFFECDATE ,
+                                                   PREMIUM_C1.DEXPIRDAT  , PREMIUM_C1.NAMOUNT     , SKEY                  ,
+                                                   PREMIUM_C1.NDIGIT     , PREMIUM_C1.NPAYNUMBE   , DCARDEXPIR            ,
+                                                   SCLIENTPAY            , PREMIUM_C1.NTYPE       , SDIGIT_AUX            ,
+                                                   PREMIUM_C1.NCURRENCY  , NORI_AMOUNT            , DEXPIRDAT             ,
+                                                   DINCREASE_AUX         , INSCOLLECTIONBATCH.SOPTPROCESS, INSCOLLECTIONBATCH.SOPTCURRENCY,
+                                                   REAGENERALPKG.REANAMECLI( PREMIUM_C1.SCLIENTSPONSOR),   PREMIUM_C1.SCLIENTSPONSOR);
+
+                        SPROCESS:='1';
+                    EXCEPTION
+                        WHEN OTHERS THEN                        
+                             RAISE;
+                    END;
+
+                END IF;
+            END IF;
+
+        END IF;   -- **********************************
+
+        SCERTYPE_OLD := SCERTYPE;
+        NBRANCH_OLD  := NBRANCH;
+        NPRODUCT_OLD := NPRODUCT;
+        NPOLICY_OLD  := NPOLICY;
+        NCERTIF_OLD  := NCERTIF;
+        DLIMITDATE_OLD := DLIMITDATE;
+
+        COMMIT;
+
+    END LOOP;
+/***********************************************************************************************/
+/*+ FIN CICLO DE LECTURA DEL CURSOR REAPREMIUM_C1 (TABLA PREMIUM)*/
+/*+ SE REALIZA EL CICLO DE PROCESAMIENTO PARA LOS RECIBOS OBTENIDOS EN LA TABLA TMP_COLLECTION */
+/***********************************************************************************************/
+    SOLDCLIENT      := '';
+    NOLDCURRENCY    := 0;
+    SPOLICYKEY      := '';
+    NAMOUNT         := 0;
+    SDOCUMENT       := 0;
+    NBULLETINS      := 0;
+    NAMOUNT_TOTBOLD := 0;
+    DOLDLIMIT_DATE  := NULL;
+
+/* COBRANZA POR RECIBO */
+    IF SOPTGENERA = 1 THEN
+    BEGIN 
+        BUPDAGREE := TRUE;
+        FOR R_REG_3_1 IN (SELECT SCERTYPE, NBRANCH, NPRODUCT,
+                                 NRECEIPT, SCLIENT, NBANK_CODE,
+                                 SDOCUMENT, SUM(NAMOUNT) NPREMIUM,
+                                 NCURRENCY, SKEYADDRESS,NVL( DVALUEDATE,INSCOLLECTIONBATCH.DINCREASE) DVALUEDATE
+                            FROM TMP_COLLECTION
+                           WHERE SKEY        = INSCOLLECTIONBATCH.SKEY
+                             AND (NBANK_CODE = INSCOLLECTIONBATCH.NBANK
+                              OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                           GROUP BY SCERTYPE  , NBRANCH, NPRODUCT,
+                                    NRECEIPT  , SCLIENT, NBANK_CODE,
+                                    SDOCUMENT , NCURRENCY, SKEYADDRESS,
+                                    DVALUEDATE
+                           ORDER BY SCLIENT, NBANK_CODE, SDOCUMENT) 
+        LOOP
+
+            /*+ RESCATA SECUENCIA DEL BOLETIN PARA ASIGNAR NUMERACION */
+            INSNUMERATORSP (NTYPENUM => 60         ,
+                            NORD_NUM => 0          ,
+                            NNUMBER  => NBULLETINS);
+
+            IF SOPTPROCESS = 2 THEN
+                IF INSCOLLECTIONBATCH.NWAY_PAY = 3 AND INSCOLLECTIONBATCH.NCOD_AGREE IS NOT NULL AND BUPDAGREE THEN
+                    BUPDAGREE := FALSE;
+                    INSUPDCTROLDATEAGREE(NBATCH         => 101,
+                                         NCOD_AGREE  => INSCOLLECTIONBATCH.NCOD_AGREE,
+                                         NWAY_PAY    => INSCOLLECTIONBATCH.NWAY_PAY,
+                                         NUSERCODE   => INSCOLLECTIONBATCH.NUSERCODE);
+                END IF;
+
+/*+ SI LA MONEDA ES ORIGEN , SE BUSCA EL FACTOR DE CAMBIO PARA INGRESARLO EN EL BOLETIN */
+                IF SOPTCURRENCY = '1' THEN
+                    NEXCHANGE := REAGENERALPKG.REAEXCHANGELOCAL(R_REG_3_1.NCURRENCY, NVL(R_REG_3_1.DVALUEDATE, INSCOLLECTIONBATCH.DINCREASE));
+                ELSE
+                    NEXCHANGE := 1;
+                END IF;
+           
+        
+         /*+ INSERTA NUEVO BOLETIN POR RECIBO */
+                BEGIN
+                    INSERT INTO BULLETINS (NBULLETINS   , SCLIENT     , NINSUR_AREA  ,
+                                           DLIMIT_PAY   , NCURRENCY   , NWAY_PAY     ,
+                                           NCOD_AGREE   , NAMOUNT     , NSTATUS      ,
+                                           NCANCEL_COD  , NBORDEREAUX , DSTATDATE    ,
+                                           NREJECTCAUSE , NBANK_CODE  , DPAYDATE     ,
+                                           NEXCHANGE    , NCURRPAY    , DCOMPDATE    ,
+                                           NUSERCODE    , SIND_DOMIC  , SKEYADDRESS  ,
+                                           DSEND_DOMIC  , SDOCUMENT   , NLIMIT_PAY_DD)
+                                   VALUES (NBULLETINS , R_REG_3_1.SCLIENT   , NINSUR_AREA    ,
+                                           DEXPIRDAT  , R_REG_3_1.NCURRENCY , NWAY_PAY       ,
+                                           NULL       , R_REG_3_1.NPREMIUM  , 1              ,
+                                           NULL       , NULL                , TRUNC(SYSDATE) ,
+                                           NULL       , R_REG_3_1.NBANK_CODE, NULL           ,
+                                           NEXCHANGE  , NULL                , SYSDATE        ,
+                                           NUSERCODE  , NULL                , R_REG_3_1.SKEYADDRESS,
+                                           DEXPIRDAT  , R_REG_3_1.SDOCUMENT , TO_CHAR(DEXPIRDAT,'DD'));
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'BULLETINS: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                         CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                         NPOLICY       =>0, --R_REG_3_1.NPOLICY                           ,
+                                         NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                         NRECEIPT      => R_REG_3_1.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );
+                END;
+                IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                   /*+ SI LA VIA DE PAGO ES PAC BUSCAMOS EL FORMATO DE LA CUENTA A INFORMAR DE LA TABLA DE LOS BANCOS EN CONVENIOS BANK_AGREE +*/
+                    IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC THEN
+                    BEGIN
+                        SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY , NCERTIF
+                          INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX , NCERTIF_AUX
+                          FROM TMP_COLLECTION
+                         WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                           AND NBANK_CODE = R_REG_3_1.NBANK_CODE
+                           AND SCLIENT    = R_REG_3_1.SCLIENT
+                           AND TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT)
+                           AND ROWNUM     = 1;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            RAISE;
+                            /*NBRANCH_AUX  := 0;
+                            NPRODUCT_AUX := 0;
+                            NPOLICY_AUX  := 0;*/
+                    END;
+                        SDOCUMENT_AUX  := FORMATSDOCUMENT('1',R_REG_3_1.NBANK_CODE,R_REG_3_1.SDOCUMENT);
+                    ELSIF   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                         BEGIN
+                            SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY , NCERTIF
+                              INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX, NCERTIF_AUX
+                              FROM TMP_COLLECTION
+                             WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                               AND SCLIENT    = R_REG_3_1.SCLIENT
+                               AND trim(SDOCUMENT) = trim(R_REG_3_1.SDOCUMENT)
+                               AND ROWNUM     = 1;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                RAISE;
+                        END;
+                      SDOCUMENT_AUX := trim(R_REG_3_1.SDOCUMENT);
+                    END IF;
+
+                    BEGIN
+                        INSERT INTO COLLECT_GEN (NBULLETINS   , SCLIENT   , NWAY_PAY  ,
+                                                 DCOLLEC_DATE , NCURRENCY , NUSERCODE ,
+                                                 NAMOUNT      , NBANK     , NBRANCH   ,
+                                                 NPRODUCT     , NPOLICY   , DCOMPDATE ,
+                                                 DVALUEDATE   , SDOCUMENT, NCERTIF)
+                                         VALUES (INSCOLLECTIONBATCH.NBULLETINS , R_REG_3_1.SCLIENT    , NWAY_PAY    ,
+                                                 DEXPIRDAT                     , NCURRENCY_AUX        , NUSERCODE   ,
+                                                 R_REG_3_1.NPREMIUM            , R_REG_3_1.NBANK_CODE , NBRANCH_AUX ,
+                                                 NPRODUCT_AUX                  , NPOLICY_AUX          , SYSDATE     ,
+                                                 INSCOLLECTIONBATCH.DINCREASE  , SDOCUMENT_AUX, NCERTIF_AUX);
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'COLLECT_GEN: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                             CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                         NPOLICY       =>0, --R_REG_3_1.NPOLICY                           ,
+                                         NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                         NRECEIPT      => R_REG_3_1.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );
+                    END;
+
+                END IF;
+
+            FOR R_REG_3_2 IN (SELECT NBULLETINS  , NINSUR_AREA , NWAY_PAY                     ,
+                                     SCERTYPE    , NBRANCH     , NPRODUCT                     ,
+                                     NPOLICY     , NRECEIPT    , NCERTIF                      ,
+                                     SCLIENT     , NBANK_CODE  , NCODE_AGREE                  ,
+                                     DLIMIT_DATE , SKEYADDRESS , SDOCUMENT                    ,
+                                     NPREMIUM    , NDIGIT      , NPAYNUMBE                    ,
+                                     NCONTRAT    , NDRAFT      , NTRATYPEI                    ,
+                                     DECODE(SOPTCURRENCY,'1',NORI_CURR,NCURRENCY) "NCURRENCY" ,
+                                     DECODE(SOPTCURRENCY,'1',NORI_AMOUNT,NAMOUNT) "NAMOUNT"   ,
+                                     ROWID A, NORI_AMOUNT,NORI_CURR,
+                                     DVALUEDATE
+                                FROM TMP_COLLECTION
+                               WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                                 AND SCERTYPE   = R_REG_3_1.SCERTYPE
+                                 AND NBRANCH    = R_REG_3_1.NBRANCH
+                                 AND NPRODUCT   = R_REG_3_1.NPRODUCT
+                                 AND NRECEIPT   = R_REG_3_1.NRECEIPT
+                                 AND SCLIENT    = R_REG_3_1.SCLIENT
+                                 AND ( trim(SDOCUMENT)  = trim(R_REG_3_1.SDOCUMENT) OR NVL(trim(R_REG_3_1.SDOCUMENT),'*') = '*')
+                                 AND ( NBANK_CODE = R_REG_3_1.NBANK_CODE OR NVL(R_REG_3_1.NBANK_CODE,0) = 0)) LOOP
+
+                INSBULLETINSNULL (NWAY_PAY    => R_REG_3_2.NWAY_PAY    ,
+                                  NCOD_AGREE  => R_REG_3_2.NCODE_AGREE ,
+                                  DLIMIT_PAY  => R_REG_3_2.DLIMIT_DATE ,
+                                  NBULLSTART  => R_REG_3_2.NBULLETINS  ,
+                                  NBULLEND    => R_REG_3_2.NBULLETINS  ,
+                                  NCANCEL_COD => 3                     ,
+                                  NUSERCODE   => NUSERCODE             ,
+                                  SCOMMIT     => 'N');
+               /*EN CASO QUE SE DESVINCULA  EL BOLETIN  SE GENERA EN LA TABLA DE LOG*/
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                         NPOLICY       => 0,--R_REG_3_1.NPOLICY                           ,
+                                         NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                         NRECEIPT      => R_REG_3_1.NRECEIPT                              ,
+                                         SERROR        => 'RECIBO NO INCLURIDO EN LA COBRANZA'                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => R_REG_3_2.NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );                   
+
+                IF R_REG_3_2.NTRATYPEI IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN
+                    NCOLLECDOCTYP := 1;
+                ELSE
+                   IF R_REG_3_2.NTRATYPEI = 13 THEN
+                       NCOLLECDOCTYP := 10;
+                   ELSE
+                       IF R_REG_3_2.NTRATYPEI = 99 THEN
+                           NCOLLECDOCTYP := 9;
+                       ELSE
+                           NCOLLECDOCTYP := R_REG_3_2.NTRATYPEI;
+                       END IF;
+                   END IF;
+                END IF;
+                IF NVL(R_REG_3_2.NCONTRAT,0) <> 0 THEN
+                    NCOLLECDOCTYP := 2;
+                END IF;
+
+                /* SI LA VIA DE PAGO ES DESCUENTO POR PLANILLA SE ACTUALIZA EL CONVENIO EN BULLETINS */
+                IF R_REG_3_2.NWAY_PAY = 3 THEN
+                    UPDATE BULLETINS
+                       SET NCOD_AGREE = R_REG_3_2.NCODE_AGREE
+                     WHERE NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS;
+                END IF;
+
+                BEGIN
+                    /*+ SE CREA EL DETALLE DEL BOLETIN (POR RECIBO PROCESADO) */
+                    
+                        CREBULLETINS_DET (NBULLETINS    => INSCOLLECTIONBATCH.NBULLETINS,
+                                      NID           => NULL                  ,
+                                      NCOLLECDOCTYP => NCOLLECDOCTYP         ,
+                                      SCERTYPE      => R_REG_3_2.SCERTYPE    ,
+                                      NBRANCH       => R_REG_3_2.NBRANCH     ,
+                                      NPRODUCT      => R_REG_3_2.NPRODUCT    ,
+                                      NRECEIPT      => R_REG_3_2.NRECEIPT    ,
+                                      NDIGIT        => R_REG_3_2.NDIGIT      ,
+                                      NPAYNUMBE     => R_REG_3_2.NPAYNUMBE   ,
+                                      NCONTRAT      => R_REG_3_2.NCONTRAT    ,
+                                      NDRAFT        => R_REG_3_2.NDRAFT      ,
+                                      NAMOUNTPAY    => NULL                  ,
+                                      NAMOUNT       => R_REG_3_2.NAMOUNT     ,
+                                      NUSERCODE     => NUSERCODE             ,
+                                      NCOMMIT       => 1                     ,
+                                      NPREMIUM      => R_REG_3_2.NORI_AMOUNT ,
+                                      DVALUEDATE    => R_REG_3_2.DVALUEDATE  ,
+                                      NEXCHANGE     => NEXCHANGE             );
+                                      
+                        INSPREMIUM_MO (NRECEIPT      => R_REG_3_2.NRECEIPT  ,
+                                      NPRODUCT      => R_REG_3_2.NPRODUCT ,
+                                      NBRANCH       => R_REG_3_2.NBRANCH        ,
+                                      SCERTYPE      => R_REG_3_2.SCERTYPE  ,
+                                      NDIGIT        => 0               ,
+                                      NPAYNUMBE     => R_REG_3_2.NPAYNUMBE ,
+                                      NTRANSAC      => NULL            ,
+                                      NAMOUNT       => 0               ,
+                                      NCARD_TYPE    => NULL            ,
+                                      SAUX_ACCOUN   => NULL            ,
+                                      NBALANCE      => R_REG_3_2.NORI_AMOUNT,
+                                      NBANK_CODE    => NULL            ,
+                                      NBORDEREAUX   => NULL            ,
+                                      DCAR_DATEXP   => NULL            ,
+                                      SCARD_NUM     => NULL            ,
+                                      NCASH_MOV     => NULL            ,
+                                      NCAUSE_AMEN   => NULL            ,
+                                      SCESSICOI     => '2'             ,
+                                      SCHANG_ACC    => NULL            ,
+                                      NCURRENCY     => R_REG_3_2.NORI_CURR ,
+                                      SDOCNUMBE     => NULL            ,
+                                      SIND_REVER    => '2'             ,
+                                      NINT_MORA     => 0               ,
+                                      SINTERMEI     => NULL            ,
+                                      NNULLCODE     => NULL            ,
+                                      SPAY_FORM     => NULL  ,
+                                      DPOSTED       => NULL            ,
+                                      NPREMIUM      => R_REG_3_2.NPREMIUM   ,
+                                      NRECEIPT_FA   => NULL            ,
+                                      DSTATDATE     => TRUNC(SYSDATE)      ,
+                                      SSTATISI      => '2'             ,
+                                      NUSERCODE     => NUSERCODE       ,
+                                      DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                                      NTYPE         => 39              , --ENVIO A COBRANZA
+                                      NEXCHANGE     => NULL   ,
+                                      SINDASSOCPRO  => '2'             ,
+                                      NPAYSOONDISC  => NULL            ,
+                                      NBULLETINS    => R_REG_3_2.NBULLETINS,
+                                      NCASHNUM      => NULL            ,
+                                      NBILLNUM      => NULL            ,
+                                      SBILLTYPE     => NULL            ,
+                                      NCOLLECTOR    => NULL,
+                                      SINDCHEQUE    => NULL            ,
+                                      NPAYREJECT    => NULL,
+                                      NAMOUNT_LOC   => R_REG_3_2.NAMOUNT,
+                                      NCOMMIT       => 2                );                                         
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'BULLETINS_DET: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                         NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                         NCERTIF       => R_REG_3_2.NCERTIF                           ,
+                                         NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                            );
+                END;
+
+                IF R_REG_3_2.NCONTRAT IS NULL THEN
+                    BEGIN
+                        UPDATE PREMIUM
+                           SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS,
+                               DCOMPDATE  = SYSDATE,
+                               NUSERCODE  = NUSERCODE
+                         WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                           AND NBRANCH   = R_REG_3_2.NBRANCH
+                           AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                           AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                           AND NDIGIT    = R_REG_3_2.NDIGIT
+                           AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE;
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'NO SE AGREGO NUMERO DE BOLETIN EN PREMIUM -> ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => R_REG_3_2.NCERTIF                           ,
+                                             NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                             SERROR        => SERROR                                          ,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                            );
+                    END;
+                END IF;
+
+                IF NVL(R_REG_3_2.NCONTRAT,0) > 0 AND
+                   NVL(R_REG_3_2.NDRAFT,0) >= 0 THEN
+                    /*+ ASIGNA NUMERO DE BOLETIN CON FINANCIAMIENTO */
+                    BEGIN
+                        UPDATE FINANC_DRA
+                           SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS ,
+                               DCOMPDATE  = SYSDATE                       ,
+                               NUSERCODE  = INSCOLLECTIONBATCH.NUSERCODE
+                         WHERE NCONTRAT = R_REG_3_2.NCONTRAT
+                           AND NDRAFT   = R_REG_3_2.NDRAFT;
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                STOO_ROWCNT  := 0;
+                                NTABLECREATE := 3;
+                                SERROR       := 'FINANC_DRA :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                 NBANK         => NBANK                                          ,
+                                                 NCURRENCY     => NCURRENCY                                      ,
+                                                 SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                 NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                 NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                                 NCERTIF       => R_REG_3_2.NCERTIF                           ,
+                                                 NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                                 SERROR        => SERROR                                          ,
+                                                 DCOMPDATE     => SYSDATE                                         ,
+                                                 NUSERCODE     => NUSERCODE                                       ,
+                                                 SACCOUNT      => NULL                                            ,
+                                                 SKEY          => SKEY                                            ,
+                                                 NWAY_PAY      => NWAY_PAY                                        ,
+                                                 NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                 NBULLETINS    => NBULLETINS                                      ,
+                                                 NCOLLECDOCTYP => 0                                               ,
+                                                 NBORDEREAUX   => NULL                                            ,
+                                                 NCONTRAT      => 0                                               ,
+                                                 NDRAFT        => NULL                                           );
+                           END;
+                ELSE
+                    /*+ SE ACTUALIZA EL CAMPO NBULLETINS DE LA TABLA PREMIUM_MO (ULTIMO MOVIMIENTO) */
+                    BEGIN
+                        STOO_ROWCNT  := 0;
+                        UPDATE PREMIUM_MO
+                           SET NBULLETINS  = INSCOLLECTIONBATCH.NBULLETINS,
+                               NUSERCODE   = NUSERCODE,
+                               DCOMPDATE   = SYSDATE
+                         WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                           AND NBRANCH   = R_REG_3_2.NBRANCH
+                           AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                           AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                           AND NDIGIT    = R_REG_3_2.NDIGIT
+                           AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE
+                           AND NTRANSAC  = (SELECT MAX(NTRANSAC)
+                                              FROM PREMIUM_MO
+                                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE);
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            NULL;--RAISE;
+                    END;
+                END IF;
+
+                /*+ ASIGNA NUMERO DE BOLETIN A TEMPORAL */
+                BEGIN
+                    UPDATE TMP_COLLECTION
+                       SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS
+                     WHERE ROWID = R_REG_3_2.A;
+                    STOO_ROWCNT := SQL%ROWCOUNT;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'TMP_COLLECTION :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => R_REG_3_2.NCERTIF                           ,
+                                             NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                             SERROR        => SERROR                                          ,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );
+                END;
+
+            END LOOP;
+
+        END IF;
+
+        END LOOP;
+    END;
+    END IF;
+
+/*+COBRANZA POR POLIZA */
+    IF SOPTGENERA = 2 THEN
+    BEGIN
+        BUPDAGREE := TRUE;
+/*+COBRANZA POR PÓLIZA CON CONVENIO*/
+        FOR R_REG_3_1 IN (SELECT SCERTYPE,              NBRANCH,                NPRODUCT,
+                                  NPOLICY,              SCLIENT,                NBANK_CODE,
+                                  NULL SDOCUMENT,       SUM(NAMOUNT) NPREMIUM, NCURRENCY,
+                                  NCODE_AGREE, NVL( DVALUEDATE,INSCOLLECTIONBATCH.DINCREASE) DVALUEDATE
+                             FROM TMP_COLLECTION
+                            WHERE SKEY                       = INSCOLLECTIONBATCH.SKEY
+                              AND (NBANK_CODE                = INSCOLLECTIONBATCH.NBANK
+                               OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                              AND NVL(NCODE_AGREE,0)        <> 0
+                              and NWAY_PAY = 3
+                            GROUP BY SCERTYPE,      NBRANCH,                NPRODUCT,
+                                     NPOLICY,       SCLIENT,                NBANK_CODE,DVALUEDATE,
+                                     NCURRENCY,     NCODE_AGREE
+                            ORDER BY SCLIENT, NBANK_CODE) LOOP
+        BEGIN
+            /*+ RESCATA SECUENCIA DEL BOLETIN PARA ASIGNAR NUMERACION */
+            INSNUMERATORSP (NTYPENUM => 60         ,
+                            NORD_NUM => 0          ,
+                            NNUMBER  => NBULLETINS);
+
+            IF SOPTPROCESS = 2 THEN
+                IF INSCOLLECTIONBATCH.NWAY_PAY = 3 AND INSCOLLECTIONBATCH.NCOD_AGREE IS NOT NULL AND BUPDAGREE THEN
+                    BUPDAGREE := FALSE;
+                    INSUPDCTROLDATEAGREE(NBATCH         => 101,
+                                         NCOD_AGREE  => INSCOLLECTIONBATCH.NCOD_AGREE,
+                                         NWAY_PAY    => INSCOLLECTIONBATCH.NWAY_PAY,
+                                         NUSERCODE   => INSCOLLECTIONBATCH.NUSERCODE);
+                END IF;
+                BEGIN
+                    SELECT SKEYADDRESS
+                      INTO SKEYADDRESS
+                      FROM TMP_COLLECTION
+                     WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                       AND (NBANK_CODE = R_REG_3_1.NBANK_CODE
+                        OR NVL(NBANK_CODE,0) = 0)   
+                       AND SCLIENT    = R_REG_3_1.SCLIENT
+                       AND SKEYADDRESS IS NOT NULL
+                       AND ROWNUM     = 1;
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        BEGIN
+                            SELECT SKEYADDRESS
+                              INTO SKEYADDRESS
+                              FROM TMP_COLLECTION
+                             WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                               AND NPOLICY    = R_REG_3_1.NPOLICY
+                               AND SKEYADDRESS IS NOT NULL
+                               AND ROWNUM     = 1;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                SKEYADDRESS := NULL;
+                        END;
+                END;
+
+/*+ SI LA MONEDA ES ORIGEN , SE BUSCA EL FACTOR DE CAMBIO PARA INGRESARLO EN EL BOLETIN */
+                IF SOPTCURRENCY = '1' THEN
+                    NEXCHANGE := REAGENERALPKG.REAEXCHANGELOCAL(R_REG_3_1.NCURRENCY,  NVL(R_REG_3_1.DVALUEDATE, INSCOLLECTIONBATCH.DINCREASE));
+                END IF;
+
+/*+ INSERTA NUEVO BOLETIN POR POLIZA/CONVENIO */
+                BEGIN
+                    INSERT INTO BULLETINS (NBULLETINS,          SCLIENT,                NINSUR_AREA,
+                                           DLIMIT_PAY,           NCURRENCY,             NWAY_PAY,
+                                           NCOD_AGREE,           NAMOUNT,               NSTATUS,
+                                           NCANCEL_COD,          NBORDEREAUX,           DSTATDATE,
+                                           NREJECTCAUSE,         NBANK_CODE,            DPAYDATE,
+                                           NEXCHANGE,            NCURRPAY,              DCOMPDATE,
+                                           NUSERCODE,            SIND_DOMIC,            SKEYADDRESS,
+                                           DSEND_DOMIC,          SDOCUMENT,             NLIMIT_PAY_DD)
+                                   VALUES (NBULLETINS,           R_REG_3_1.SCLIENT,     NINSUR_AREA,
+                                           DEXPIRDAT,            R_REG_3_1.NCURRENCY,   NWAY_PAY,
+                                           R_REG_3_1.NCODE_AGREE,R_REG_3_1.NPREMIUM,    1,
+                                           NULL,                 NULL,                  TRUNC(SYSDATE),
+                                           NULL,                 R_REG_3_1.NBANK_CODE,  NULL,
+                                           NEXCHANGE,            NULL,                  SYSDATE,
+                                           NUSERCODE,            NULL,                  SKEYADDRESS,
+                                           DEXPIRDAT,            R_REG_3_1.SDOCUMENT,   TO_CHAR(DEXPIRDAT,'DD'));
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'BULLETINS: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                         NPOLICY       => 0,--R_REG_3_1.NPOLICY                           ,
+                                         NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                         NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                           );
+                END;
+
+                IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                   /*+ SI LA VIA DE PAGO ES PAC BUSCAMOS EL FORMATO DE LA CUENTA A INFORMAR DE LA TABLA DE LOS BANCOS EN CONVENIOS BANK_AGREE +*/
+                    IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC THEN
+                    BEGIN
+                        SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY,NCERTIF
+                          INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX,NCERTIF_AUX
+                          FROM TMP_COLLECTION
+                         WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                           AND NBANK_CODE = R_REG_3_1.NBANK_CODE
+                           AND SCLIENT    = R_REG_3_1.SCLIENT
+                           AND TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT)
+                           AND ROWNUM     = 1;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            RAISE;
+                            /*NBRANCH_AUX  := 0;
+                            NPRODUCT_AUX := 0;
+                            NPOLICY_AUX  := 0;*/
+                    END;
+                    
+                    SDOCUMENT_AUX  := FORMATSDOCUMENT('1',R_REG_3_1.NBANK_CODE,R_REG_3_1.SDOCUMENT);
+                    
+                    ELSIF NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                        BEGIN
+                            SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY,NCERTIF
+                              INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX,NCERTIF_AUX
+                              FROM TMP_COLLECTION
+                             WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                               AND SCLIENT    = R_REG_3_1.SCLIENT
+                               AND TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT)
+                               AND ROWNUM     = 1;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                RAISE;
+                        END;
+                          SDOCUMENT_AUX  :=R_REG_3_1.SDOCUMENT;
+                    END IF;
+
+                    BEGIN
+                        INSERT INTO COLLECT_GEN (NBULLETINS   , SCLIENT   , NWAY_PAY  ,
+                                                 DCOLLEC_DATE , NCURRENCY , NUSERCODE ,
+                                                 NAMOUNT      , NBANK     , NBRANCH   ,
+                                                 NPRODUCT     , NPOLICY   , DCOMPDATE ,
+                                                 DVALUEDATE   , SDOCUMENT, NCERTIF)
+                                         VALUES (INSCOLLECTIONBATCH.NBULLETINS , R_REG_3_1.SCLIENT    , NWAY_PAY    ,
+                                                 DEXPIRDAT                     , NCURRENCY_AUX        , NUSERCODE   ,
+                                                 R_REG_3_1.NPREMIUM            , R_REG_3_1.NBANK_CODE , NBRANCH_AUX ,
+                                                 NPRODUCT_AUX                  , NPOLICY_AUX          , SYSDATE     ,
+                                                 INSCOLLECTIONBATCH.DINCREASE  , SDOCUMENT_AUX, NCERTIF_AUX);
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'COLLECT_GEN: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                 NBANK         => NBANK                                          ,
+                                                 NCURRENCY     => NCURRENCY                                      ,
+                                                 SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                                 NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                                 NPOLICY       => R_REG_3_1.NPOLICY                           ,
+                                                 NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                 NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                 SERROR        => SERROR                                          ,
+                                                 DCOMPDATE     => SYSDATE                                         ,
+                                                 NUSERCODE     => NUSERCODE                                       ,
+                                                 SACCOUNT      => NULL                                            ,
+                                                 SKEY          => SKEY                                            ,
+                                                 NWAY_PAY      => NWAY_PAY                                        ,
+                                                 NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                 NBULLETINS    => NBULLETINS                                      ,
+                                                 NCOLLECDOCTYP => 0                                               ,
+                                                 NBORDEREAUX   => NULL                                            ,
+                                                 NCONTRAT      => 0                                               ,
+                                                 NDRAFT        => NULL                                           );
+                    END;
+
+                END IF;
+
+                FOR R_REG_3_2 IN (SELECT NBULLETINS  , NINSUR_AREA , NWAY_PAY                     ,
+                                         SCERTYPE    , NBRANCH     , NPRODUCT                     ,
+                                         NPOLICY     , NRECEIPT    , NCERTIF                      ,
+                                         SCLIENT     , NBANK_CODE  , NCODE_AGREE                  ,
+                                         DLIMIT_DATE , SKEYADDRESS , SDOCUMENT                    ,
+                                         NPREMIUM    , NDIGIT      , NPAYNUMBE                    ,
+                                         NCONTRAT    , NDRAFT      , NTRATYPEI                    ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_CURR,NCURRENCY) "NCURRENCY" ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_AMOUNT,NAMOUNT) "NAMOUNT"   ,
+                                         ROWID A, NORI_AMOUNT,NORI_CURR,
+                                         DVALUEDATE
+                                    FROM TMP_COLLECTION
+                                   WHERE SKEY           = INSCOLLECTIONBATCH.SKEY
+                                     AND SCERTYPE       = R_REG_3_1.SCERTYPE
+                                     AND NBRANCH        = R_REG_3_1.NBRANCH
+                                     AND NPRODUCT       = R_REG_3_1.NPRODUCT
+                                     AND NPOLICY        = R_REG_3_1.NPOLICY
+    --                                 AND NCERTIF    = R_REG_3_1.NCERTIF
+                                     AND SCLIENT        = R_REG_3_1.SCLIENT
+                                     AND (NCODE_AGREE   = R_REG_3_1.NCODE_AGREE OR NVL(R_REG_3_1.NCODE_AGREE,0) = 0)
+                                     AND (TRIM(SDOCUMENT)     = TRIM(R_REG_3_1.SDOCUMENT) OR NVL(TRIM(R_REG_3_1.SDOCUMENT),'*') = '*')
+                                     AND (NBANK_CODE    = R_REG_3_1.NBANK_CODE OR NVL(R_REG_3_1.NBANK_CODE,0) = 0)) LOOP
+                                     
+
+                    INSBULLETINSNULL (NWAY_PAY    => R_REG_3_2.NWAY_PAY    ,
+                                      NCOD_AGREE  => R_REG_3_2.NCODE_AGREE ,
+                                      DLIMIT_PAY  => R_REG_3_2.DLIMIT_DATE ,
+                                      NBULLSTART  => R_REG_3_2.NBULLETINS  ,
+                                      NBULLEND    => R_REG_3_2.NBULLETINS  ,
+                                      NCANCEL_COD => 3                     ,
+                                      NUSERCODE   => NUSERCODE             ,
+                                      SCOMMIT     => 'N');
+                                      
+--                    CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+--                                     NBANK         => NBANK                                          ,
+--                                     NCURRENCY     => NCURRENCY                                      ,
+--                                     SCLIENT       => R_REG_3_2.SCLIENT                              ,
+--                                     NBRANCH       => R_REG_3_2.NBRANCH                              ,
+--                                     NPOLICY       => R_REG_3_2.NPOLICY                           ,
+--                                     NCERTIF       => R_REG_3_2.NCERTIF                           ,
+--                                     NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+--                                     SERROR        => 'RECIBO DESVINCULADO DEL BOLLETIN' ,
+--                                     DCOMPDATE     => SYSDATE                                         ,
+--                                     NUSERCODE     => NUSERCODE                                       ,
+--                                     SACCOUNT      => NULL                                            ,
+--                                     SKEY          => SKEY                                            ,
+--                                     NWAY_PAY      => NWAY_PAY                                        ,
+--                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+--                                     NBULLETINS    => NBULLETINS                                      ,
+--                                     NCOLLECDOCTYP => 0                                               ,
+--                                     NBORDEREAUX   => NULL                                            ,
+--                                     NCONTRAT      => 0                                               ,
+--                                     NDRAFT        => NULL                                           );  
+
+                    IF R_REG_3_2.NTRATYPEI IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN
+                        NCOLLECDOCTYP := 1;
+                    ELSE
+                       IF R_REG_3_2.NTRATYPEI = 13 THEN
+                           NCOLLECDOCTYP := 10;
+                       ELSE
+                           IF R_REG_3_2.NTRATYPEI = 99 THEN
+                               NCOLLECDOCTYP := 9;
+                           ELSE
+                               NCOLLECDOCTYP := R_REG_3_2.NTRATYPEI;
+                           END IF;
+                       END IF;
+                    END IF;
+                    IF NVL(R_REG_3_2.NCONTRAT,0) <> 0 THEN
+                        NCOLLECDOCTYP := 2;
+                    END IF;
+
+/* SI LA VIA DE PAGO ES DESCUENTO POR PLANILLA SE ACTUALIZA EL CONVENIO EN BULLETINS */
+                    IF R_REG_3_2.NWAY_PAY = 3 THEN
+                        UPDATE BULLETINS SET NCOD_AGREE = R_REG_3_2.NCODE_AGREE
+                         WHERE NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS;
+                    END IF;
+
+                    BEGIN
+/*+ SE CREA EL DETALLE DEL BOLETIN (POR RECIBO PROCESADO) */
+                        CREBULLETINS_DET (NBULLETINS    => INSCOLLECTIONBATCH.NBULLETINS,
+                                          NID           => NULL                  ,
+                                          NCOLLECDOCTYP => NCOLLECDOCTYP         ,
+                                          SCERTYPE      => R_REG_3_2.SCERTYPE    ,
+                                          NBRANCH       => R_REG_3_2.NBRANCH     ,
+                                          NPRODUCT      => R_REG_3_2.NPRODUCT    ,
+                                          NRECEIPT      => R_REG_3_2.NRECEIPT    ,
+                                          NDIGIT        => R_REG_3_2.NDIGIT      ,
+                                          NPAYNUMBE     => R_REG_3_2.NPAYNUMBE   ,
+                                          NCONTRAT      => R_REG_3_2.NCONTRAT    ,
+                                          NDRAFT        => R_REG_3_2.NDRAFT      ,
+                                          NAMOUNTPAY    => NULL                  ,
+                                          NAMOUNT       => R_REG_3_2.NAMOUNT     ,
+                                          NUSERCODE     => NUSERCODE             ,
+                                          NCOMMIT       => 1                     ,
+                                          NPREMIUM      => R_REG_3_2.NORI_AMOUNT ,
+                                          DVALUEDATE    => R_REG_3_2.DVALUEDATE  ,
+                                          NEXCHANGE     => NEXCHANGE             );
+
+                        INSPREMIUM_MO (NRECEIPT      => R_REG_3_2.NRECEIPT  ,
+                                      NPRODUCT      => R_REG_3_2.NPRODUCT ,
+                                      NBRANCH       => R_REG_3_2.NBRANCH        ,
+                                      SCERTYPE      => R_REG_3_2.SCERTYPE  ,
+                                      NDIGIT        => 0               ,
+                                      NPAYNUMBE     => R_REG_3_2.NPAYNUMBE ,
+                                      NTRANSAC      => NULL            ,
+                                      NAMOUNT       => 0               ,
+                                      NCARD_TYPE    => NULL            ,
+                                      SAUX_ACCOUN   => NULL            ,
+                                      NBALANCE      => R_REG_3_2.NORI_AMOUNT,
+                                      NBANK_CODE    => NULL            ,
+                                      NBORDEREAUX   => NULL            ,
+                                      DCAR_DATEXP   => NULL            ,
+                                      SCARD_NUM     => NULL            ,
+                                      NCASH_MOV     => NULL            ,
+                                      NCAUSE_AMEN   => NULL            ,
+                                      SCESSICOI     => '2'             ,
+                                      SCHANG_ACC    => NULL            ,
+                                      NCURRENCY     => R_REG_3_2.NORI_CURR ,
+                                      SDOCNUMBE     => NULL            ,
+                                      SIND_REVER    => '2'             ,
+                                      NINT_MORA     => 0               ,
+                                      SINTERMEI     => NULL            ,
+                                      NNULLCODE     => NULL            ,
+                                      SPAY_FORM     => NULL  ,
+                                      DPOSTED       => NULL            ,
+                                      NPREMIUM      => R_REG_3_2.NPREMIUM   ,
+                                      NRECEIPT_FA   => NULL            ,
+                                      DSTATDATE     => TRUNC(SYSDATE)      ,
+                                      SSTATISI      => '2'             ,
+                                      NUSERCODE     => NUSERCODE       ,
+                                      DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                                      NTYPE         => 39              , --ENVIO A COBRANZA
+                                      NEXCHANGE     => NULL   ,
+                                      SINDASSOCPRO  => '2'             ,
+                                      NPAYSOONDISC  => NULL            ,
+                                      NBULLETINS    => R_REG_3_2.NBULLETINS,
+                                      NCASHNUM      => NULL            ,
+                                      NBILLNUM      => NULL            ,
+                                      SBILLTYPE     => NULL            ,
+                                      NCOLLECTOR    => NULL,
+                                      SINDCHEQUE    => NULL            ,
+                                      NPAYREJECT    => NULL,
+                                      NAMOUNT_LOC   => R_REG_3_2.NAMOUNT,
+                                      NCOMMIT       => 2                );
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'BULLETINS_DET: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => -R_REG_3_2.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );  
+                    END;
+
+                    IF R_REG_3_2.NCONTRAT IS NULL THEN
+                        BEGIN
+                            UPDATE PREMIUM
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS,
+                                   DCOMPDATE  = SYSDATE,
+                                   NUSERCODE  = NUSERCODE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                STOO_ROWCNT  := 0;
+                                NTABLECREATE := 3;
+                                SERROR       := 'NO SE AGREGO NUMERO DE BOLETIN EN PREMIUM -> ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );  
+                        END;
+                    END IF;
+
+                    IF NVL(R_REG_3_2.NCONTRAT,0) > 0 AND
+                       NVL(R_REG_3_2.NDRAFT,0) >= 0 THEN
+                        /*+ ASIGNA NUMERO DE BOLETIN CON FINANCIAMIENTO */
+                        BEGIN
+                            UPDATE FINANC_DRA
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS ,
+                                   DCOMPDATE  = SYSDATE                       ,
+                                   NUSERCODE  = INSCOLLECTIONBATCH.NUSERCODE
+                             WHERE NCONTRAT = R_REG_3_2.NCONTRAT
+                               AND NDRAFT   = R_REG_3_2.NDRAFT;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                            EXCEPTION
+                                WHEN OTHERS THEN
+                                    STOO_ROWCNT  := 0;
+                                    NTABLECREATE := 3;
+                                    SERROR       := 'FINANC_DRA :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                    CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                     NBANK         => NBANK                                          ,
+                                                     NCURRENCY     => NCURRENCY                                      ,
+                                                     SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                     NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                     NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                                     NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                     NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                     SERROR        => SERROR,
+                                                     DCOMPDATE     => SYSDATE                                         ,
+                                                     NUSERCODE     => NUSERCODE                                       ,
+                                                     SACCOUNT      => NULL                                            ,
+                                                     SKEY          => SKEY                                            ,
+                                                     NWAY_PAY      => NWAY_PAY                                        ,
+                                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                     NBULLETINS    => NBULLETINS                                      ,
+                                                     NCOLLECDOCTYP => 0                                               ,
+                                                     NBORDEREAUX   => NULL                                            ,
+                                                     NCONTRAT      => 0                                               ,
+                                                     NDRAFT        => NULL                                           );  
+                        END;
+                    ELSE
+                        /*+ SE ACTUALIZA EL CAMPO NBULLETINS DE LA TABLA PREMIUM_MO (ULTIMO MOVIMIENTO) */
+                        BEGIN
+                            STOO_ROWCNT  := 0;
+                            UPDATE PREMIUM_MO
+                               SET NBULLETINS  = INSCOLLECTIONBATCH.NBULLETINS,
+                                   NUSERCODE   = NUSERCODE,
+                                   DCOMPDATE   = SYSDATE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE
+                               AND NTRANSAC  = (SELECT MAX(NTRANSAC)
+                                                  FROM PREMIUM_MO
+                                                 WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                                                   AND NBRANCH   = R_REG_3_2.NBRANCH
+                                                   AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                                                   AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                                                   AND NDIGIT    = R_REG_3_2.NDIGIT
+                                                   AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE);
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                NULL;--RAISE;
+                        END;
+                    END IF;
+
+                    /*+ ASIGNA NUMERO DE BOLETIN A TEMPORAL */
+                    BEGIN
+                        UPDATE TMP_COLLECTION
+                           SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS
+                         WHERE ROWID = R_REG_3_2.A;
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'TMP_COLLECTION :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                     NBANK         => NBANK                                          ,
+                                                     NCURRENCY     => NCURRENCY                                      ,
+                                                     SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                     NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                     NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                                     NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                     NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                     SERROR        => SERROR,
+                                                     DCOMPDATE     => SYSDATE                                         ,
+                                                     NUSERCODE     => NUSERCODE                                       ,
+                                                     SACCOUNT      => NULL                                            ,
+                                                     SKEY          => SKEY                                            ,
+                                                     NWAY_PAY      => NWAY_PAY                                        ,
+                                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                     NBULLETINS    => NBULLETINS                                      ,
+                                                     NCOLLECDOCTYP => 0                                               ,
+                                                     NBORDEREAUX   => NULL                                            ,
+                                                     NCONTRAT      => 0                                               ,
+                                                     NDRAFT        => NULL                                           );
+                    END;
+
+                END LOOP;
+
+            END IF;
+        END;
+        END LOOP;
+
+/*+COBRANZA POR PÓLIZA CON VIA DE PAGO DISTINTA A CONVENIO*/
+        FOR R_REG_3_1 IN (SELECT SCERTYPE,      NBRANCH,                NPRODUCT,
+                                  NPOLICY,       SCLIENT,                NBANK_CODE,
+                                  SDOCUMENT,     SUM(NAMOUNT) NPREMIUM, NCURRENCY,
+                                  NCERTIF,       SKEYADDRESS
+                            FROM TMP_COLLECTION
+                           WHERE SKEY                       = INSCOLLECTIONBATCH.SKEY
+                             AND (NBANK_CODE                = INSCOLLECTIONBATCH.NBANK
+                              OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                             AND NVL(NCODE_AGREE,0)         = 0
+                           GROUP BY SCERTYPE,   NBRANCH,                NPRODUCT,
+                                    NPOLICY,    SCLIENT,                NBANK_CODE,
+                                    SDOCUMENT,  NCURRENCY,              NCERTIF, SKEYADDRESS
+                           ORDER BY SCLIENT,    NBANK_CODE,             SDOCUMENT) LOOP
+        BEGIN
+
+            NBRANCH_AUX   := R_REG_3_1.NBRANCH;
+            NPRODUCT_AUX  := R_REG_3_1.NPRODUCT;
+            NPOLICY_AUX   := R_REG_3_1.NPOLICY;
+            NCURRENCY_AUX := R_REG_3_1.NCURRENCY; 
+            NCERTIF_AUX   := R_REG_3_1.NCERTIF;
+
+            /*+ RESCATA SECUENCIA DEL BOLETIN PARA ASIGNAR NUMERACION */
+            INSNUMERATORSP (NTYPENUM => 60         ,
+                            NORD_NUM => 0          ,
+                            NNUMBER  => NBULLETINS);
+
+            IF SOPTPROCESS = 2 THEN
+
+--                BEGIN
+--                    SELECT SKEYADDRESS
+--                      INTO SKEYADDRESS
+--                      FROM TMP_COLLECTION
+--                     WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+--                       AND NBANK_CODE = R_REG_3_1.NBANK_CODE
+--                       AND SCLIENT    = R_REG_3_1.SCLIENT
+--                       AND SDOCUMENT  = R_REG_3_1.SDOCUMENT
+--                       AND SKEYADDRESS IS NOT NULL
+--                       AND ROWNUM     = 1;
+--                EXCEPTION
+--                    WHEN OTHERS THEN
+--                        SKEYADDRESS := NULL;
+--                END;
+
+
+/*+ SI LA MONEDA ES ORIGEN , SE BUSCA EL FACTOR DE CAMBIO PARA INGRESARLO EN EL BOLETIN */
+                IF SOPTCURRENCY = '1' THEN
+                    NEXCHANGE := REAGENERALPKG.REAEXCHANGELOCAL(R_REG_3_1.NCURRENCY, INSCOLLECTIONBATCH.DINCREASE);
+                END IF;
+
+/*+ INSERTA NUEVO BOLETIN POR POLIZA/CONVENIO */
+                BEGIN
+                    INSERT INTO BULLETINS (NBULLETINS,          SCLIENT,                NINSUR_AREA,
+                                           DLIMIT_PAY,           NCURRENCY,             NWAY_PAY,
+                                           NCOD_AGREE,           NAMOUNT,               NSTATUS,
+                                           NCANCEL_COD,          NBORDEREAUX,           DSTATDATE,
+                                           NREJECTCAUSE,         NBANK_CODE,            DPAYDATE,
+                                           NEXCHANGE,            NCURRPAY,              DCOMPDATE,
+                                           NUSERCODE,            SIND_DOMIC,            SKEYADDRESS,
+                                           DSEND_DOMIC,          SDOCUMENT,             NLIMIT_PAY_DD)
+                                   VALUES (NBULLETINS,           R_REG_3_1.SCLIENT,     NINSUR_AREA,
+                                           DEXPIRDAT,            R_REG_3_1.NCURRENCY,   NWAY_PAY,
+                                           NULL,                 R_REG_3_1.NPREMIUM,    1,
+                                           NULL,                 NULL,                  TRUNC(SYSDATE),
+                                           NULL,                 R_REG_3_1.NBANK_CODE,  NULL,
+                                           NEXCHANGE,            NULL,                  SYSDATE,
+                                           NUSERCODE,            NULL,                  R_REG_3_1.SKEYADDRESS,
+                                           DEXPIRDAT,            R_REG_3_1.SDOCUMENT,   TO_CHAR(DEXPIRDAT,'DD'));
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'BULLETINS: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                         NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                         NPOLICY       => R_REG_3_1.NPOLICY                           ,
+                                         NCERTIF       => R_REG_3_1.NCERTIF                           ,
+                                         NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                           );
+                END;
+
+                IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+
+                    IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC THEN
+                        SDOCUMENT_AUX := FORMATSDOCUMENT('1',R_REG_3_1.NBANK_CODE,R_REG_3_1.SDOCUMENT);
+                    ELSIF NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                        SDOCUMENT_AUX := R_REG_3_1.SDOCUMENT;
+                    END IF;
+
+                    BEGIN
+                        INSERT INTO COLLECT_GEN (NBULLETINS   , SCLIENT   , NWAY_PAY  ,
+                                                 DCOLLEC_DATE , NCURRENCY , NUSERCODE ,
+                                                 NAMOUNT      , NBANK     , NBRANCH   ,
+                                                 NPRODUCT     , NPOLICY   , DCOMPDATE ,
+                                                 DVALUEDATE   , SDOCUMENT, NCERTIF)
+                                         VALUES (INSCOLLECTIONBATCH.NBULLETINS , R_REG_3_1.SCLIENT    , NWAY_PAY    ,
+                                                 DEXPIRDAT                     , R_REG_3_1.NCURRENCY  , NUSERCODE   ,
+                                                 R_REG_3_1.NPREMIUM            , R_REG_3_1.NBANK_CODE , R_REG_3_1.NBRANCH,
+                                                 R_REG_3_1.NPRODUCT            , R_REG_3_1.NPOLICY    , SYSDATE     ,
+                                                 INSCOLLECTIONBATCH.DINCREASE  , SDOCUMENT_AUX, NCERTIF_AUX);
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'COLLECT_GEN: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_1.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_1.NPOLICY                           ,
+                                             NCERTIF       => R_REG_3_1.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR                                          ,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );
+                    END;
+
+                END IF;
+
+                FOR R_REG_3_2 IN (SELECT NBULLETINS  , NINSUR_AREA , NWAY_PAY                     ,
+                                         SCERTYPE    , NBRANCH     , NPRODUCT                     ,
+                                         NPOLICY     , NRECEIPT    , NCERTIF                      ,
+                                         SCLIENT     , NBANK_CODE  , NCODE_AGREE                  ,
+                                         DLIMIT_DATE , SKEYADDRESS , SDOCUMENT                    ,
+                                         NPREMIUM    , NDIGIT      , NPAYNUMBE                    ,
+                                         NCONTRAT    , NDRAFT      , NTRATYPEI                    ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_CURR,NCURRENCY) "NCURRENCY" ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_AMOUNT,NAMOUNT) "NAMOUNT"   ,
+                                         ROWID A, NORI_AMOUNT, NORI_CURR, 
+                                         DVALUEDATE
+                                    FROM TMP_COLLECTION
+                                   WHERE SKEY           = INSCOLLECTIONBATCH.SKEY
+                                     AND SCERTYPE       = R_REG_3_1.SCERTYPE
+                                     AND NBRANCH        = R_REG_3_1.NBRANCH
+                                     AND NPRODUCT       = R_REG_3_1.NPRODUCT
+                                     AND NPOLICY        = R_REG_3_1.NPOLICY
+                                     AND NCERTIF        = R_REG_3_1.NCERTIF
+                                     AND SCLIENT        = R_REG_3_1.SCLIENT
+                                     AND (TRIM(SDOCUMENT)     = TRIM(R_REG_3_1.SDOCUMENT) OR NVL(TRIM(R_REG_3_1.SDOCUMENT),'*') = '*')
+                                     AND (NBANK_CODE    = R_REG_3_1.NBANK_CODE OR NVL(R_REG_3_1.NBANK_CODE,0) = 0)) LOOP
+                                     
+
+                    INSBULLETINSNULL (NWAY_PAY    => R_REG_3_2.NWAY_PAY    ,
+                                      NCOD_AGREE  => R_REG_3_2.NCODE_AGREE ,
+                                      DLIMIT_PAY  => R_REG_3_2.DLIMIT_DATE ,
+                                      NBULLSTART  => R_REG_3_2.NBULLETINS  ,
+                                      NBULLEND    => R_REG_3_2.NBULLETINS  ,
+                                      NCANCEL_COD => 3                     ,
+                                      NUSERCODE   => NUSERCODE             ,
+                                      SCOMMIT     => 'N');
+                                      
+                    IF R_REG_3_2.NTRATYPEI IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN
+                        NCOLLECDOCTYP := 1;
+                    ELSE
+                       IF R_REG_3_2.NTRATYPEI = 13 THEN
+                           NCOLLECDOCTYP := 10;
+                       ELSE
+                           IF R_REG_3_2.NTRATYPEI = 99 THEN
+                               NCOLLECDOCTYP := 9;
+                           ELSE
+                               NCOLLECDOCTYP := R_REG_3_2.NTRATYPEI;
+                           END IF;
+                       END IF;
+                    END IF;
+                    IF NVL(R_REG_3_2.NCONTRAT,0) <> 0 THEN
+                        NCOLLECDOCTYP := 2;
+                    END IF;
+
+                    /* SI LA VIA DE PAGO ES DESCUENTO POR PLANILLA SE ACTUALIZA EL CONVENIO EN BULLETINS */
+                    IF R_REG_3_2.NWAY_PAY = 3 THEN
+                        UPDATE BULLETINS
+                           SET NCOD_AGREE = R_REG_3_2.NCODE_AGREE
+                         WHERE NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS;
+                    END IF;
+                    BEGIN
+/*+ SE CREA EL DETALLE DEL BOLETIN (POR RECIBO PROCESADO) */
+                        CREBULLETINS_DET (NBULLETINS    => INSCOLLECTIONBATCH.NBULLETINS,
+                                          NID           => NULL                  ,
+                                          NCOLLECDOCTYP => NCOLLECDOCTYP         ,
+                                          SCERTYPE      => R_REG_3_2.SCERTYPE    ,
+                                          NBRANCH       => R_REG_3_2.NBRANCH     ,
+                                          NPRODUCT      => R_REG_3_2.NPRODUCT    ,
+                                          NRECEIPT      => R_REG_3_2.NRECEIPT    ,
+                                          NDIGIT        => R_REG_3_2.NDIGIT      ,
+                                          NPAYNUMBE     => R_REG_3_2.NPAYNUMBE   ,
+                                          NCONTRAT      => R_REG_3_2.NCONTRAT    ,
+                                          NDRAFT        => R_REG_3_2.NDRAFT      ,
+                                          NAMOUNTPAY    => NULL                  ,
+                                          NAMOUNT       => R_REG_3_2.NAMOUNT     ,
+                                          NUSERCODE     => NUSERCODE             ,
+                                          NCOMMIT       => 1                     ,
+                                          NPREMIUM      => R_REG_3_2.NORI_AMOUNT ,
+                                          DVALUEDATE    => R_REG_3_2.DVALUEDATE  ,
+                                          NEXCHANGE     => NEXCHANGE             );
+
+                        INSPREMIUM_MO (NRECEIPT      => R_REG_3_2.NRECEIPT  ,
+                                      NPRODUCT      => R_REG_3_2.NPRODUCT ,
+                                      NBRANCH       => R_REG_3_2.NBRANCH        ,
+                                      SCERTYPE      => R_REG_3_2.SCERTYPE  ,
+                                      NDIGIT        => 0               ,
+                                      NPAYNUMBE     => R_REG_3_2.NPAYNUMBE ,
+                                      NTRANSAC      => NULL            ,
+                                      NAMOUNT       => 0               ,
+                                      NCARD_TYPE    => NULL            ,
+                                      SAUX_ACCOUN   => NULL            ,
+                                      NBALANCE      => R_REG_3_2.NORI_AMOUNT,
+                                      NBANK_CODE    => NULL            ,
+                                      NBORDEREAUX   => NULL            ,
+                                      DCAR_DATEXP   => NULL            ,
+                                      SCARD_NUM     => NULL            ,
+                                      NCASH_MOV     => NULL            ,
+                                      NCAUSE_AMEN   => NULL            ,
+                                      SCESSICOI     => '2'             ,
+                                      SCHANG_ACC    => NULL            ,
+                                      NCURRENCY     => R_REG_3_2.NORI_CURR ,
+                                      SDOCNUMBE     => NULL            ,
+                                      SIND_REVER    => '2'             ,
+                                      NINT_MORA     => 0               ,
+                                      SINTERMEI     => NULL            ,
+                                      NNULLCODE     => NULL            ,
+                                      SPAY_FORM     => NULL  ,
+                                      DPOSTED       => NULL            ,
+                                      NPREMIUM      => R_REG_3_2.NPREMIUM   ,
+                                      NRECEIPT_FA   => NULL            ,
+                                      DSTATDATE     => TRUNC(SYSDATE)      ,
+                                      SSTATISI      => '2'             ,
+                                      NUSERCODE     => NUSERCODE       ,
+                                      DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                                      NTYPE         => 39              , --ENVIO A COBRANZA
+                                      NEXCHANGE     => NULL   ,
+                                      SINDASSOCPRO  => '2'             ,
+                                      NPAYSOONDISC  => NULL            ,
+                                      NBULLETINS    => R_REG_3_2.NBULLETINS,
+                                      NCASHNUM      => NULL            ,
+                                      NBILLNUM      => NULL            ,
+                                      SBILLTYPE     => NULL            ,
+                                      NCOLLECTOR    => NULL,
+                                      SINDCHEQUE    => NULL            ,
+                                      NPAYREJECT    => NULL,
+                                      NAMOUNT_LOC   => R_REG_3_2.NAMOUNT,
+                                      NCOMMIT       => 2                );
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'BULLETINS_DET: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => -R_REG_3_2.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );  
+                    END;
+
+                    IF R_REG_3_2.NCONTRAT IS NULL THEN
+                        BEGIN
+                            UPDATE PREMIUM
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS,
+                                   DCOMPDATE  = SYSDATE,
+                                   NUSERCODE  = NUSERCODE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                STOO_ROWCNT  := 0;
+                                NTABLECREATE := 3;
+                                SERROR       := 'NO SE AGREGO NUMERO DE BOLETIN EN PREMIUM -> ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );  
+                        END;
+                    END IF;
+
+                    IF NVL(R_REG_3_2.NCONTRAT,0) > 0 AND
+                       NVL(R_REG_3_2.NDRAFT,0) >= 0 THEN
+                        /*+ ASIGNA NUMERO DE BOLETIN CON FINANCIAMIENTO */
+                        BEGIN
+                            UPDATE FINANC_DRA
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS ,
+                                   DCOMPDATE  = SYSDATE                       ,
+                                   NUSERCODE  = INSCOLLECTIONBATCH.NUSERCODE
+                             WHERE NCONTRAT = R_REG_3_2.NCONTRAT
+                               AND NDRAFT   = R_REG_3_2.NDRAFT;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                            EXCEPTION
+                                WHEN OTHERS THEN
+                                    STOO_ROWCNT  := 0;
+                                    NTABLECREATE := 3;
+                                    SERROR       := 'FINANC_DRA :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                    CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                     NBANK         => NBANK                                          ,
+                                                     NCURRENCY     => NCURRENCY                                      ,
+                                                     SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                     NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                     NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                                     NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                     NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                     SERROR        => SERROR,
+                                                     DCOMPDATE     => SYSDATE                                         ,
+                                                     NUSERCODE     => NUSERCODE                                       ,
+                                                     SACCOUNT      => NULL                                            ,
+                                                     SKEY          => SKEY                                            ,
+                                                     NWAY_PAY      => NWAY_PAY                                        ,
+                                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                     NBULLETINS    => NBULLETINS                                      ,
+                                                     NCOLLECDOCTYP => 0                                               ,
+                                                     NBORDEREAUX   => NULL                                            ,
+                                                     NCONTRAT      => 0                                               ,
+                                                     NDRAFT        => NULL                                           );  
+                        END;
+                    ELSE
+                        /*+ SE ACTUALIZA EL CAMPO NBULLETINS DE LA TABLA PREMIUM_MO (ULTIMO MOVIMIENTO) */
+                        BEGIN
+                            STOO_ROWCNT  := 0;
+                            UPDATE PREMIUM_MO
+                               SET NBULLETINS  = INSCOLLECTIONBATCH.NBULLETINS,
+                                   NUSERCODE   = NUSERCODE,
+                                   DCOMPDATE   = SYSDATE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE
+                               AND NTRANSAC  = (SELECT MAX(NTRANSAC)
+                                                  FROM PREMIUM_MO
+                                                 WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                                                   AND NBRANCH   = R_REG_3_2.NBRANCH
+                                                   AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                                                   AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                                                   AND NDIGIT    = R_REG_3_2.NDIGIT
+                                                   AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE);
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                NULL;--RAISE;
+                        END;
+                    END IF;
+
+                    /*+ ASIGNA NUMERO DE BOLETIN A TEMPORAL */
+                    BEGIN
+                        UPDATE TMP_COLLECTION
+                           SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS
+                         WHERE ROWID = R_REG_3_2.A;
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'TMP_COLLECTION :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                            CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                             NBANK         => NBANK                                          ,
+                                             NCURRENCY     => NCURRENCY                                      ,
+                                             SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                             NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                             NPOLICY       => R_REG_3_2.NPOLICY                           ,
+                                             NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                             NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                             SERROR        => SERROR,
+                                             DCOMPDATE     => SYSDATE                                         ,
+                                             NUSERCODE     => NUSERCODE                                       ,
+                                             SACCOUNT      => NULL                                            ,
+                                             SKEY          => SKEY                                            ,
+                                             NWAY_PAY      => NWAY_PAY                                        ,
+                                             NINSUR_AREA   => NINSUR_AREA                                     ,
+                                             NBULLETINS    => NBULLETINS                                      ,
+                                             NCOLLECDOCTYP => 0                                               ,
+                                             NBORDEREAUX   => NULL                                            ,
+                                             NCONTRAT      => 0                                               ,
+                                             NDRAFT        => NULL                                           );
+                    END;
+                END LOOP;
+            END IF;
+        END;
+        END LOOP;
+    END;
+    END IF;
+    
+    
+/* COBRANZA POR CLIENTE */
+    IF SOPTGENERA = 3 THEN 
+    BEGIN
+        BUPDAGREE := TRUE;
+        FOR R_REG_3_1 IN (SELECT SCLIENT, NBANK_CODE, SDOCUMENT,
+                                 SUM(NAMOUNT) NPREMIUM , NCURRENCY,NVL( DVALUEDATE,INSCOLLECTIONBATCH.DINCREASE) DVALUEDATE,
+                                 SKEYADDRESS--, NCODE_AGREE
+                            FROM TMP_COLLECTION
+                           WHERE SKEY        = INSCOLLECTIONBATCH.SKEY
+                             AND (NBANK_CODE = INSCOLLECTIONBATCH.NBANK
+                              OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                             --AND NVL(NCODE_AGREE,0)         = 0
+                           GROUP BY SCLIENT, NBANK_CODE, SDOCUMENT , NCURRENCY,DVALUEDATE, SKEYADDRESS--, NCODE_AGREE
+                           ORDER BY SCLIENT, NBANK_CODE, SDOCUMENT) LOOP
+        BEGIN
+            /*+ RESCATA SECUENCIA DEL BOLETIN PARA ASIGNAR NUMERACION */
+            INSNUMERATORSP (NTYPENUM => 60         ,
+                            NORD_NUM => 0          ,
+                            NNUMBER  => NBULLETINS);
+
+            IF SOPTPROCESS = 2 THEN
+                IF INSCOLLECTIONBATCH.NWAY_PAY = 3 AND INSCOLLECTIONBATCH.NCOD_AGREE IS NOT NULL AND BUPDAGREE THEN
+                    BUPDAGREE := FALSE;
+                    INSUPDCTROLDATEAGREE(NBATCH         => 101,
+                                         NCOD_AGREE  => INSCOLLECTIONBATCH.NCOD_AGREE,
+                                         NWAY_PAY    => INSCOLLECTIONBATCH.NWAY_PAY,
+                                         NUSERCODE   => INSCOLLECTIONBATCH.NUSERCODE);
+                END IF;
+/*+ SI LA MONEDA ES ORIGEN , SE BUSCA EL FACTOR DE CAMBIO PARA INGRESARLO EN EL BOLETIN */
+                IF SOPTCURRENCY = '1' THEN
+                    NEXCHANGE := REAGENERALPKG.REAEXCHANGELOCAL(R_REG_3_1.NCURRENCY, NVL( R_REG_3_1.DVALUEDATE, INSCOLLECTIONBATCH.DINCREASE));
+                END IF;
+
+            /*+ INSERTA NUEVO BOLETIN POR CLIENTE */
+                BEGIN
+                    INSERT INTO BULLETINS (NBULLETINS   , SCLIENT     , NINSUR_AREA  ,
+                                           DLIMIT_PAY   , NCURRENCY   , NWAY_PAY     ,
+                                           NCOD_AGREE   , NAMOUNT     , NSTATUS      ,
+                                           NCANCEL_COD  , NBORDEREAUX , DSTATDATE    ,
+                                           NREJECTCAUSE , NBANK_CODE  , DPAYDATE     ,
+                                           NEXCHANGE    , NCURRPAY    , DCOMPDATE    ,
+                                           NUSERCODE    , SIND_DOMIC  , SKEYADDRESS  ,
+                                           DSEND_DOMIC  , SDOCUMENT   , NLIMIT_PAY_DD)
+                                   VALUES (NBULLETINS           , R_REG_3_1.SCLIENT   , NULL           ,
+                                           DEXPIRDAT            , R_REG_3_1.NCURRENCY , NWAY_PAY       ,
+--                                           R_REG_3_1.NCODE_AGREE, R_REG_3_1.NPREMIUM  , 1              ,
+                                           NULL                 , R_REG_3_1.NPREMIUM  , 1              ,
+                                           NULL                 , NULL                , TRUNC(SYSDATE) ,
+                                           NULL                 , R_REG_3_1.NBANK_CODE, NULL           ,
+                                           NEXCHANGE            , NULL                , SYSDATE        ,
+                                           NUSERCODE            , NULL                , R_REG_3_1.SKEYADDRESS           ,
+                                           DEXPIRDAT            , R_REG_3_1.SDOCUMENT , TO_CHAR(DEXPIRDAT,'DD'));
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        STOO_ROWCNT  := 0;
+                        NTABLECREATE := 3;
+                        SERROR       := 'BULLETINS: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                     NBANK         => NBANK                                          ,
+                                                     NCURRENCY     => NCURRENCY                                      ,
+                                                     SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                                     NBRANCH       => NBRANCH_P,                              
+                                                     NPOLICY       => 0,                           
+                                                     NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                     NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                     SERROR        => SERROR,
+                                                     DCOMPDATE     => SYSDATE                                         ,
+                                                     NUSERCODE     => NUSERCODE                                       ,
+                                                     SACCOUNT      => NULL                                            ,
+                                                     SKEY          => SKEY                                            ,
+                                                     NWAY_PAY      => NWAY_PAY                                        ,
+                                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                     NBULLETINS    => NBULLETINS                                      ,
+                                                     NCOLLECDOCTYP => 0                                               ,
+                                                     NBORDEREAUX   => NULL                                            ,
+                                                     NCONTRAT      => 0                                               ,
+                                                     NDRAFT        => NULL                                           );
+                END;
+                IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC OR
+                   NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                   /*+ SI LA VIA DE PAGO ES PAC BUSCAMOS EL FORMATO DE LA CUENTA A INFORMAR DE LA TABLA DE LOS BANCOS EN CONVENIOS BANK_AGREE +*/
+                    IF NWAY_PAY = INSGENERALPKG.EWAYPAYBYPAC THEN
+                    BEGIN
+                        SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY, NCERTIF
+                          INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX, NCERTIF_AUX
+                          FROM TMP_COLLECTION
+                         WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                           AND NBANK_CODE = R_REG_3_1.NBANK_CODE
+                           AND SCLIENT    = R_REG_3_1.SCLIENT
+                           AND TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT)
+                           AND ROWNUM     = 1;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            RAISE;
+                            /*NBRANCH_AUX  := 0;
+                            NPRODUCT_AUX := 0;
+                            NPOLICY_AUX  := 0;*/
+                    END;
+
+                     SDOCUMENT_AUX  := FORMATSDOCUMENT('1',R_REG_3_1.NBANK_CODE,R_REG_3_1.SDOCUMENT);
+
+                    ELSIF NWAY_PAY = INSGENERALPKG.EWAYPAYBYTRANSBANK THEN
+                         BEGIN
+                                SELECT NBRANCH, NPRODUCT, NPOLICY, NCURRENCY, NCERTIF
+                                  INTO NBRANCH_AUX, NPRODUCT_AUX, NPOLICY_AUX, NCURRENCY_AUX, NCERTIF_AUX
+                                  FROM TMP_COLLECTION
+                                 WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                                   AND SCLIENT    = R_REG_3_1.SCLIENT
+                                   AND TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT)
+                                   AND ROWNUM     = 1;
+                            EXCEPTION
+                            WHEN OTHERS THEN
+                                RAISE;
+                         END;
+                      SDOCUMENT_AUX  := R_REG_3_1.SDOCUMENT;
+                    END IF;
+
+                    BEGIN
+                        INSERT INTO COLLECT_GEN (NBULLETINS   , SCLIENT   , NWAY_PAY  ,
+                                                 DCOLLEC_DATE , NCURRENCY , NUSERCODE ,
+                                                 NAMOUNT      , NBANK     , NBRANCH   ,
+                                                 NPRODUCT     , NPOLICY   , DCOMPDATE ,
+                                                 DVALUEDATE   , SDOCUMENT, NCERTIF)
+                                         VALUES (INSCOLLECTIONBATCH.NBULLETINS , R_REG_3_1.SCLIENT    , NWAY_PAY    ,
+                                                 DEXPIRDAT                     , NCURRENCY_AUX        , NUSERCODE   ,
+                                                 R_REG_3_1.NPREMIUM            , R_REG_3_1.NBANK_CODE , NBRANCH_AUX ,
+                                                 NPRODUCT_AUX                  , NPOLICY_AUX          , SYSDATE     ,
+                                                 NVL( R_REG_3_1.DVALUEDATE, INSCOLLECTIONBATCH.DINCREASE)  , SDOCUMENT_AUX, NCERTIF_AUX);
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'COLLECT_GEN: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                 NBANK         => NBANK                                          ,
+                                                 NCURRENCY     => NCURRENCY                                      ,
+                                                 SCLIENT       => R_REG_3_1.SCLIENT                              ,
+                                                 NBRANCH       =>  NBRANCH_AUX,
+                                                 NPOLICY       => 0,-- R_REG_3_1.NPOLICY                           ,
+                                                 NCERTIF       => 0,--R_REG_3_1.NCERTIF                           ,
+                                                 NRECEIPT      => 0,--R_REG_3_1.NRECEIPT                              ,
+                                                 SERROR        => SERROR                                          ,
+                                                 DCOMPDATE     => SYSDATE                                         ,
+                                                 NUSERCODE     => NUSERCODE                                       ,
+                                                 SACCOUNT      => NULL                                            ,
+                                                 SKEY          => SKEY                                            ,
+                                                 NWAY_PAY      => NWAY_PAY                                        ,
+                                                 NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                 NBULLETINS    => NBULLETINS                                      ,
+                                                 NCOLLECDOCTYP => 0                                               ,
+                                                 NBORDEREAUX   => NULL                                            ,
+                                                 NCONTRAT      => 0                                               ,
+                                                 NDRAFT        => NULL                                           );
+                    END;
+
+                END IF;
+
+                FOR R_REG_3_2 IN (SELECT NBULLETINS  , NINSUR_AREA , NWAY_PAY                     ,
+                                         SCERTYPE    , NBRANCH     , NPRODUCT                     ,
+                                         NPOLICY     , NRECEIPT    , NCERTIF                      ,
+                                         SCLIENT     , NBANK_CODE  , NCODE_AGREE                  ,
+                                         DLIMIT_DATE , SKEYADDRESS , SDOCUMENT                    ,
+                                         NPREMIUM    , NDIGIT      , NPAYNUMBE                    ,
+                                         NCONTRAT    , NDRAFT      , NTRATYPEI                    ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_CURR,NCURRENCY) "NCURRENCY" ,
+                                         DECODE(SOPTCURRENCY,'1',NORI_AMOUNT,NAMOUNT) "NAMOUNT"   ,
+                                         ROWID A, NORI_AMOUNT, DVALUEDATE,NORI_CURR
+                                    FROM TMP_COLLECTION
+                                   WHERE SKEY       = INSCOLLECTIONBATCH.SKEY
+                                     AND SCLIENT    = R_REG_3_1.SCLIENT
+                                     AND ( TRIM(SDOCUMENT)  = TRIM(R_REG_3_1.SDOCUMENT) OR NVL(TRIM(R_REG_3_1.SDOCUMENT),'*') = '*')
+                                     AND ( NBANK_CODE = R_REG_3_1.NBANK_CODE OR NVL(R_REG_3_1.NBANK_CODE,0) = 0)) LOOP
+
+
+                    INSBULLETINSNULL (NWAY_PAY    => R_REG_3_2.NWAY_PAY    ,
+                                      NCOD_AGREE  => R_REG_3_2.NCODE_AGREE ,
+                                      DLIMIT_PAY  => R_REG_3_2.DLIMIT_DATE ,
+                                      NBULLSTART  => R_REG_3_2.NBULLETINS  ,
+                                      NBULLEND    => R_REG_3_2.NBULLETINS  ,
+                                      NCANCEL_COD => 3                     ,
+                                      NUSERCODE   => NUSERCODE             ,
+                                      SCOMMIT     => 'N');
+                                      
+                    IF R_REG_3_2.NTRATYPEI IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN
+                        NCOLLECDOCTYP := 1;
+                    ELSE
+                       IF R_REG_3_2.NTRATYPEI = 13 THEN
+                           NCOLLECDOCTYP := 10;
+                       ELSE
+                           IF R_REG_3_2.NTRATYPEI = 99 THEN
+                               NCOLLECDOCTYP := 9;
+                           ELSE
+                               NCOLLECDOCTYP := R_REG_3_2.NTRATYPEI;
+                           END IF;
+                       END IF;
+                    END IF;
+                    IF NVL(R_REG_3_2.NCONTRAT,0) <> 0 THEN
+                        NCOLLECDOCTYP := 2;
+                    END IF;
+
+                    /* SI LA VIA DE PAGO ES DESCUENTO POR PLANILLA SE ACTUALIZA EL CONVENIO EN BULLETINS */
+                    IF R_REG_3_2.NWAY_PAY = 3 THEN
+                        UPDATE BULLETINS
+                           SET NCOD_AGREE = R_REG_3_2.NCODE_AGREE
+                         WHERE NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS;
+                    END IF;
+
+                    BEGIN
+                        
+                        /*+ SE CREA EL DETALLE DEL BOLETIN (POR RECIBO PROCESADO) */
+                        CREBULLETINS_DET (NBULLETINS    => INSCOLLECTIONBATCH.NBULLETINS,
+                                          NID           => NULL                  ,
+                                          NCOLLECDOCTYP => NCOLLECDOCTYP         ,
+                                          SCERTYPE      => R_REG_3_2.SCERTYPE    ,
+                                          NBRANCH       => R_REG_3_2.NBRANCH     ,
+                                          NPRODUCT      => R_REG_3_2.NPRODUCT    ,
+                                          NRECEIPT      => R_REG_3_2.NRECEIPT    ,
+                                          NDIGIT        => R_REG_3_2.NDIGIT      ,
+                                          NPAYNUMBE     => R_REG_3_2.NPAYNUMBE   ,
+                                          NCONTRAT      => R_REG_3_2.NCONTRAT    ,
+                                          NDRAFT        => R_REG_3_2.NDRAFT      ,
+                                          NAMOUNTPAY    => NULL                  ,
+                                          NAMOUNT       => R_REG_3_2.NAMOUNT     ,
+                                          NUSERCODE     => NUSERCODE             ,
+                                          NCOMMIT       => 1                     ,
+                                          NPREMIUM      => R_REG_3_2.NORI_AMOUNT ,
+                                          DVALUEDATE    => R_REG_3_2.DVALUEDATE  ,
+                                          NEXCHANGE     => NEXCHANGE             );
+
+                        INSPREMIUM_MO (NRECEIPT      => R_REG_3_2.NRECEIPT  ,
+                                      NPRODUCT      => R_REG_3_2.NPRODUCT ,
+                                      NBRANCH       => R_REG_3_2.NBRANCH        ,
+                                      SCERTYPE      => R_REG_3_2.SCERTYPE  ,
+                                      NDIGIT        => 0               ,
+                                      NPAYNUMBE     => R_REG_3_2.NPAYNUMBE ,
+                                      NTRANSAC      => NULL            ,
+                                      NAMOUNT       => 0               ,
+                                      NCARD_TYPE    => NULL            ,
+                                      SAUX_ACCOUN   => NULL            ,
+                                      NBALANCE      => R_REG_3_2.NORI_AMOUNT,
+                                      NBANK_CODE    => NULL            ,
+                                      NBORDEREAUX   => NULL            ,
+                                      DCAR_DATEXP   => NULL            ,
+                                      SCARD_NUM     => NULL            ,
+                                      NCASH_MOV     => NULL            ,
+                                      NCAUSE_AMEN   => NULL            ,
+                                      SCESSICOI     => '2'             ,
+                                      SCHANG_ACC    => NULL            ,
+                                      NCURRENCY     => R_REG_3_2.NORI_CURR ,
+                                      SDOCNUMBE     => NULL            ,
+                                      SIND_REVER    => '2'             ,
+                                      NINT_MORA     => 0               ,
+                                      SINTERMEI     => NULL            ,
+                                      NNULLCODE     => NULL            ,
+                                      SPAY_FORM     => NULL  ,
+                                      DPOSTED       => NULL            ,
+                                      NPREMIUM      => R_REG_3_2.NPREMIUM   ,
+                                      NRECEIPT_FA   => NULL            ,
+                                      DSTATDATE     => TRUNC(SYSDATE)      ,
+                                      SSTATISI      => '2'             ,
+                                      NUSERCODE     => NUSERCODE       ,
+                                      DLEDGERDAT    => TRUNC(SYSDATE)  ,
+                                      NTYPE         => 39              , --ENVIO A COBRANZA
+                                      NEXCHANGE     => NULL   ,
+                                      SINDASSOCPRO  => '2'             ,
+                                      NPAYSOONDISC  => NULL            ,
+                                      NBULLETINS    => R_REG_3_2.NBULLETINS,
+                                      NCASHNUM      => NULL            ,
+                                      NBILLNUM      => NULL            ,
+                                      SBILLTYPE     => NULL            ,
+                                      NCOLLECTOR    => NULL,
+                                      SINDCHEQUE    => NULL            ,
+                                      NPAYREJECT    => NULL,
+                                      NAMOUNT_LOC   => R_REG_3_2.NAMOUNT,
+                                      NCOMMIT       => 2                );
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'BULLETINS_DET: ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                 NBANK         => NBANK                                          ,
+                                                 NCURRENCY     => NCURRENCY                                      ,
+                                                 SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                 NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                 NPOLICY       => R_REG_3_2.NPOLICY                              ,
+                                                 NCERTIF       => R_REG_3_2.NCERTIF                              ,
+                                                 NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                                 SERROR        => SERROR                                          ,
+                                                 DCOMPDATE     => SYSDATE                                         ,
+                                                 NUSERCODE     => NUSERCODE                                       ,
+                                                 SACCOUNT      => NULL                                            ,
+                                                 SKEY          => SKEY                                            ,
+                                                 NWAY_PAY      => NWAY_PAY                                        ,
+                                                 NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                 NBULLETINS    => NBULLETINS                                      ,
+                                                 NCOLLECDOCTYP => 0                                               ,
+                                                 NBORDEREAUX   => NULL                                            ,
+                                                 NCONTRAT      => 0                                               ,
+                                                 NDRAFT        => NULL                                           );
+                    END;
+
+                    IF R_REG_3_2.NCONTRAT IS NULL THEN
+                        BEGIN
+                            UPDATE PREMIUM
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS,
+                                   DCOMPDATE  = SYSDATE,
+                                   NUSERCODE  = NUSERCODE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                STOO_ROWCNT  := 0;
+                                NTABLECREATE := 3;
+                                SERROR       := 'NO SE AGREGO NUMERO DE BOLETIN EN PREMIUM -> ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                 NBANK         => NBANK                                          ,
+                                                 NCURRENCY     => NCURRENCY                                      ,
+                                                 SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                 NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                 NPOLICY       => R_REG_3_2.NPOLICY                              ,
+                                                 NCERTIF       => R_REG_3_2.NCERTIF                              ,
+                                                 NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                                 SERROR        => SERROR                                          ,
+                                                 DCOMPDATE     => SYSDATE                                         ,
+                                                 NUSERCODE     => NUSERCODE                                       ,
+                                                 SACCOUNT      => NULL                                            ,
+                                                 SKEY          => SKEY                                            ,
+                                                 NWAY_PAY      => NWAY_PAY                                        ,
+                                                 NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                 NBULLETINS    => NBULLETINS                                      ,
+                                                 NCOLLECDOCTYP => 0                                               ,
+                                                 NBORDEREAUX   => NULL                                            ,
+                                                 NCONTRAT      => 0                                               ,
+                                                 NDRAFT        => NULL                                           );
+                        END;
+                    END IF;
+
+                    IF NVL(R_REG_3_2.NCONTRAT,0) > 0 AND
+                       NVL(R_REG_3_2.NDRAFT,0) >= 0 THEN
+                        /*+ ASIGNA NUMERO DE BOLETIN CON FINANCIAMIENTO */
+                        BEGIN
+                            UPDATE FINANC_DRA
+                               SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS ,
+                                   DCOMPDATE  = SYSDATE                       ,
+                                   NUSERCODE  = INSCOLLECTIONBATCH.NUSERCODE
+                             WHERE NCONTRAT = R_REG_3_2.NCONTRAT
+                               AND NDRAFT   = R_REG_3_2.NDRAFT;
+                            STOO_ROWCNT := SQL%ROWCOUNT;
+                            EXCEPTION
+                                WHEN OTHERS THEN
+                                    STOO_ROWCNT  := 0;
+                                    NTABLECREATE := 3;
+                                    SERROR       := 'FINANC_DRA :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                                    CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                                     NBANK         => NBANK                                          ,
+                                                     NCURRENCY     => NCURRENCY                                      ,
+                                                     SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                                     NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                                     NPOLICY       => R_REG_3_2.NPOLICY                              ,
+                                                     NCERTIF       => R_REG_3_2.NCERTIF                              ,
+                                                     NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                                     SERROR        => SERROR                                          ,
+                                                     DCOMPDATE     => SYSDATE                                         ,
+                                                     NUSERCODE     => NUSERCODE                                       ,
+                                                     SACCOUNT      => NULL                                            ,
+                                                     SKEY          => SKEY                                            ,
+                                                     NWAY_PAY      => NWAY_PAY                                        ,
+                                                     NINSUR_AREA   => NINSUR_AREA                                     ,
+                                                     NBULLETINS    => NBULLETINS                                      ,
+                                                     NCOLLECDOCTYP => 0                                               ,
+                                                     NBORDEREAUX   => NULL                                            ,
+                                                     NCONTRAT      => 0                                               ,
+                                                     NDRAFT        => NULL                                           );
+                        END;
+                    ELSE
+                        /*+ SE ACTUALIZA EL CAMPO NBULLETINS DE LA TABLA PREMIUM_MO (ULTIMO MOVIMIENTO) */
+                        BEGIN
+                            STOO_ROWCNT  := 0;
+                            UPDATE PREMIUM_MO
+                               SET NBULLETINS  = INSCOLLECTIONBATCH.NBULLETINS,
+                                   NUSERCODE   = NUSERCODE,
+                                   DCOMPDATE   = SYSDATE
+                             WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                               AND NBRANCH   = R_REG_3_2.NBRANCH
+                               AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                               AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                               AND NDIGIT    = R_REG_3_2.NDIGIT
+                               AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE
+                               AND NTRANSAC  = (SELECT MAX(NTRANSAC)
+                                                  FROM PREMIUM_MO
+                                                 WHERE SCERTYPE  = R_REG_3_2.SCERTYPE
+                                                   AND NBRANCH   = R_REG_3_2.NBRANCH
+                                                   AND NPRODUCT  = R_REG_3_2.NPRODUCT
+                                                   AND NRECEIPT  = R_REG_3_2.NRECEIPT
+                                                   AND NDIGIT    = R_REG_3_2.NDIGIT
+                                                   AND NPAYNUMBE = R_REG_3_2.NPAYNUMBE);
+                        EXCEPTION
+                            WHEN OTHERS THEN
+                                NULL;--RAISE;
+                        END;
+                    END IF;
+
+                    /*+ ASIGNA NUMERO DE BOLETIN A TEMPORAL */
+                    BEGIN
+                        UPDATE TMP_COLLECTION
+                           SET NBULLETINS = INSCOLLECTIONBATCH.NBULLETINS
+                         WHERE ROWID = R_REG_3_2.A;
+                        STOO_ROWCNT := SQL%ROWCOUNT;
+                    EXCEPTION
+                        WHEN OTHERS THEN
+                            STOO_ROWCNT  := 0;
+                            NTABLECREATE := 3;
+                            SERROR       := 'TMP_COLLECTION :' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                             CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                              NBANK         => NBANK                                          ,
+                                              NCURRENCY     => NCURRENCY                                      ,
+                                              SCLIENT       => R_REG_3_2.SCLIENT                              ,
+                                              NBRANCH       => R_REG_3_2.NBRANCH                              ,
+                                              NPOLICY       => R_REG_3_2.NPOLICY                              ,
+                                              NCERTIF       => R_REG_3_2.NCERTIF                              ,
+                                              NRECEIPT      => R_REG_3_2.NRECEIPT                              ,
+                                              SERROR        => SERROR                                          ,
+                                              DCOMPDATE     => SYSDATE                                         ,
+                                              NUSERCODE     => NUSERCODE                                       ,
+                                              SACCOUNT      => NULL                                            ,
+                                              SKEY          => SKEY                                            ,
+                                              NWAY_PAY      => NWAY_PAY                                        ,
+                                              NINSUR_AREA   => NINSUR_AREA                                     ,
+                                              NBULLETINS    => NBULLETINS                                      ,
+                                              NCOLLECDOCTYP => 0                                               ,
+                                              NBORDEREAUX   => NULL                                            ,
+                                              NCONTRAT      => 0                                               ,
+                                              NDRAFT        => NULL                                           );
+                    END;
+
+                END LOOP;
+            END IF;
+        END;
+        END LOOP;
+    END;
+    END IF;
+
+    IF BADDCOLLECION THEN
+
+        INSERT INTO TMP_COLLECTION(NBULLETINS     , NINSUR_AREA    , NWAY_PAY       , NAMOUNT        , SCLIENT        , NBANK_CODE,
+                                   SDOCUMENT      , NCONTRAT       , NDRAFT         , SCERTYPE       , NBRANCH        , NPRODUCT,
+                                   NRECEIPT       , NCURRENCY      , NCODE_AGREE    , SITEM_SUSCRIPT , DEFFECSUSCRIPT , SKEYADDRESS,
+                                   DLIMIT_DATE    , NPOLICY        , NCERTIF        , SERROR         , NTRATYPEI      , DEFFECDATE,
+                                   DNULLDATE      , NPREMIUM       , SCLIENT_ASEG   , DCARDEXPIR     , NDIGIT         , SCLIENTPAY,NPAYNUMBE,
+                                   NTYPE          , SDIGIPOL       , NORI_CURR      , NORI_AMOUNT    , SOPTPROCESS    , DINCREASE,SOPTCURRENCY,
+                                   DCOLLEC_DATE   , DVALUEDATE     , SCLIENAME_ASEG , SCLIENAME_SPON , SCLIENT_SPON   , SCLIENT_COMPANY,
+                                   DCOMPDATE      , NUSERCODE      , SKEY)
+                            SELECT DISTINCT B.NBULLETINS     , NVL(INSCOLLECTIONBATCH.NINSUR_AREA,2)    , B.NWAY_PAY       , BD.NAMOUNT        , P.SCLIENT        , B.NBANK_CODE,
+                                   P.NRECEIPT     , NULL NCONTRAT  , NULL NDRAFT         , P.SCERTYPE       , P.NBRANCH        , P.NPRODUCT,
+                                   P.NRECEIPT     , P.NCURRENCY    , P.NCOD_AGREE       , NULL SITEM_SUSCRIPT , NULL DEFFECSUSCRIPT , INSCOLLECTIONBATCH.SKEY SKEYADDRESS,
+                                   P.DLIMITDATE    , P.NPOLICY        , P.NCERTIF        , NULL SERROR         , P.NTRATYPEI      , P.DEFFECDATE,
+                                   NULL DNULLDATE   , P.NPREMIUM       , P.SCLIENT SCLIENT_ASEG   , NULL DCARDEXPIR     , P.NDIGIT         , P.SCLIENT SCLIENTPAY,P.NPAYNUMBE,
+                                   P.NTYPE          , 1 SDIGIPOL    , P.NCURRENCY NORI_CURR      , P.NBALANCE NORI_AMOUNT    , INSCOLLECTIONBATCH.SOPTPROCESS    , INSCOLLECTIONBATCH.DINCREASE,INSCOLLECTIONBATCH.SOPTCURRENCY,
+                                   INSCOLLECTIONBATCH.DEXPIRDAT   , BD.DVALUEDATE     , NULL SCLIENAME_ASEG , NULL SCLIENAME_SPON , NULL SCLIENT_SPON   , NULL SCLIENT_COMPANY,
+                                   SYSDATE      , INSCOLLECTIONBATCH.NUSERCODE      , INSCOLLECTIONBATCH.SKEY
+                     FROM BULLETINS B, PREMIUM P, BULLETINS_DET BD
+                    WHERE B.DLIMIT_PAY   <= INSCOLLECTIONBATCH.DEXPIRDAT
+                     AND (P.NBRANCH               = INSCOLLECTIONBATCH.NBRANCH_P
+                        OR  NVL(INSCOLLECTIONBATCH.NBRANCH_P,0) = 0   )
+                      AND P.NWAY_PAY        = INSCOLLECTIONBATCH.NWAY_PAY
+                      AND B.NWAY_PAY        = INSCOLLECTIONBATCH.NWAY_PAY
+                      AND (B.NBANK_CODE     = INSCOLLECTIONBATCH.NBANK  OR  INSCOLLECTIONBATCH.NBANK IS NULL)
+                      AND (P.NCOD_AGREE    = INSCOLLECTIONBATCH.NCOD_AGREE  OR  NVL(INSCOLLECTIONBATCH.NCOD_AGREE,0) = 0)
+                      AND B.NSTATUS      NOT IN (2,3) -- DISTINTO DE COBRADO O ANULADO
+                      AND B.NBULLETINS = P.NBULLETINS
+                      AND BD.NBULLETINS = P.NBULLETINS
+                      AND BD.NBRANCH       = P.NBRANCH
+                      AND BD.NPRODUCT      = P.NPRODUCT
+                      AND BD.NBULLETINS      = P.NBULLETINS
+                      AND BD.NRECEIPT      = P.NRECEIPT
+                      AND P.NSTATUS_PRE IN (1,4)
+                      AND P.NRECEIPT NOT IN ( SELECT NRECEIPT
+                                               FROM TMP_COLLECTION
+                                              WHERE SKEY = INSCOLLECTIONBATCH.SKEY);
+    END IF;
+    COMMIT;
+
+/*+ ACTUALIZO LOS SALDOS A FAVOR DE LOS CLIENTES */
+    FOR TMOVE_ACC IN C_TMP_MOVE_ACC LOOP
+        SOLDCLIENT := TMOVE_ACC.SCLIENT;
+        OPEN_AMOUNT_CLI(C_AMOUNT_CLIENT);
+        LOOP
+            FETCH C_AMOUNT_CLIENT
+             INTO R_AMOUNT_CLIENT;
+            NAMOUNT_TOTBOLD := R_AMOUNT_CLIENT.NAMOUNT;
+            EXIT WHEN C_AMOUNT_CLIENT%NOTFOUND;
+
+            IF TMOVE_ACC.NCURRENCY <> R_AMOUNT_CLIENT.NCURRENCY THEN
+                IF DINCREASE IS NULL THEN
+                    DINCREASE_AUX := TRUNC(SYSDATE);
+                ELSE
+                    DINCREASE_AUX := DINCREASE;
+                END IF;
+
+                NEXCHANGE := NULL;
+                INSCALCONVERTEXCHANGE2(PARAMNEXCHANGE  => NEXCHANGE                   ,
+                                       PARAMNAMOUNT    => TMOVE_ACC.NAMOUNT           ,
+                                       PARAMNCURORI    => TMOVE_ACC.NCURRENCY         ,
+                                       PARAMNCURDES    => R_AMOUNT_CLIENT.NCURRENCY ,
+                                       PARAMSEFFECDATE => DINCREASE_AUX               ,
+                                       PARAMNRESULT    => NAMOUNT_TOTBOL              );
+            ELSE
+                NAMOUNT_TOTBOL := TMOVE_ACC.NAMOUNT;
+            END IF;
+
+/*+ SI EL SALDO A FAVOR NO SE ENCUENTRA EN MONEDA LOCAL LO LLEVAMOS A MONEDA LOCAL*/
+            IF TMOVE_ACC.NCURRENCY <> 1 THEN
+                IF DINCREASE IS NULL THEN
+                    DINCREASE_AUX := TRUNC(SYSDATE);
+                ELSE
+                    DINCREASE_AUX := DINCREASE;
+                END IF;
+
+                NEXCHANGE := NULL;
+                INSCALCONVERTEXCHANGE2(PARAMNEXCHANGE  => NEXCHANGE           ,
+                                       PARAMNAMOUNT    => TMOVE_ACC.NAMOUNT   ,
+                                       PARAMNCURORI    => TMOVE_ACC.NCURRENCY ,
+                                       PARAMNCURDES    => 1                   ,
+                                       PARAMSEFFECDATE => DINCREASE_AUX       ,
+                                       PARAMNRESULT    => NAMOUNT_LOCAL       );
+            ELSE
+                NAMOUNT_LOCAL := TMOVE_ACC.NAMOUNT;
+            END IF;
+
+
+            NAMOUNT_TOTBOL:= NAMOUNT_TOTBOL;
+/*+ SI EL MONTO DEL BOLETIN ES MAYOR AL DE RECIBO DE DEVOLUCION*/
+            IF NAMOUNT_TOTBOL < NAMOUNT_TOTBOLD THEN
+                BEGIN
+/*+ SE ACTUALIZA EL MONTO DEL BOLETIN*/
+                    UPDATE BULLETINS
+                       SET NAMOUNT   = NAMOUNT - NAMOUNT_TOTBOL     ,
+                           DCOMPDATE = SYSDATE                      ,
+                           NUSERCODE = INSCOLLECTIONBATCH.NUSERCODE
+                     WHERE NBULLETINS = R_AMOUNT_CLIENT.NBULLETINS;
+
+/*+ SE ACTUALIZA EL MONTO DEL BOLETIN EN COLLECT_GEN*/
+                    UPDATE COLLECT_GEN
+                       SET NAMOUNT   = NAMOUNT - NAMOUNT_TOTBOL     ,
+                           DCOMPDATE = SYSDATE                      ,
+                           NUSERCODE = INSCOLLECTIONBATCH.NUSERCODE
+                     WHERE NBULLETINS = R_AMOUNT_CLIENT.NBULLETINS;
+
+/*+ SE INCLUYE EL DETALLE DEL BOLETIN*/
+                    
+                    CREBULLETINS_DET(NBULLETINS    => R_AMOUNT_CLIENT.NBULLETINS ,
+                                     NID           => NULL                         ,
+                                     NCOLLECDOCTYP => 17                           ,
+                                     SCERTYPE      => NULL                         ,
+                                     NBRANCH       => NULL                         ,
+                                     NPRODUCT      => NULL                         ,
+                                     NRECEIPT      => NULL                         ,
+                                     NDIGIT        => NULL                         ,
+                                     NPAYNUMBE     => NULL                         ,
+                                     NCONTRAT      => NULL                         ,
+                                     NDRAFT        => NULL                         ,
+                                     NAMOUNTPAY    => NULL                         ,
+                                     NAMOUNT       => NAMOUNT_TOTBOL*(-1)          ,
+                                     NUSERCODE     => NUSERCODE                    ,
+                                     NCOMMIT       => 2                            ,
+                                     DVALUEDATE    => DINCREASE_AUX ,
+                                     NEXCHANGE     => NEXCHANGE );
+
+                    INSERT INTO TMP_COLLECTION(NBULLETINS                   , NINSUR_AREA                 , NWAY_PAY                      ,
+                                               NAMOUNT                      , SCLIENT                     , NBANK_CODE                    ,
+                                               SDOCUMENT                    , NCONTRAT                    , NDRAFT                        ,
+                                               SCERTYPE                     , NBRANCH                     , NPRODUCT                      ,
+                                               NRECEIPT                     , NCURRENCY                   , NCODE_AGREE                   ,
+                                               DCOMPDATE                    , NUSERCODE                   , SKEYADDRESS                   ,
+                                               DLIMIT_DATE                  , NPOLICY                     , NCERTIF                       ,
+                                               SERROR                       , NTRATYPEI                   , DEFFECDATE                    ,
+                                               DNULLDATE                    , NPREMIUM                    , SKEY                          ,
+                                               NDIGIT                       , NPAYNUMBE                   , DCARDEXPIR                    ,
+                                               SCLIENTPAY                   , NTYPE                       , SDIGIPOL                      ,
+                                               NORI_CURR                    , NORI_AMOUNT                 , DCOLLEC_DATE                  ,
+                                               SOPTPROCESS)
+                                        VALUES(R_AMOUNT_CLIENT.NBULLETINS , NINSUR_AREA                 , NWAY_PAY                      ,
+                                               NAMOUNT_LOCAL*(-1)           , TMOVE_ACC.SCLIENT           , R_AMOUNT_CLIENT.NBANK_CODE  ,
+                                               NULL                         , NULL                        , NULL                          ,
+                                               0                            , 999                         , NULL                          ,
+                                               NULL                         , R_AMOUNT_CLIENT.NCURRENCY , R_AMOUNT_CLIENT.NCODE_AGREE ,
+                                               SYSDATE                      , NUSERCODE                   , 0                             ,
+                                               TMOVE_ACC.DOPERDATE          , 0                           , 0                             ,
+                                               ''                           , NULL                        , TMOVE_ACC.DOPERDATE           ,
+                                               NULL                         , NULL                        , SKEY                          ,
+                                               NULL                         , NULL                        , NULL                          ,
+                                               TMOVE_ACC.SCLIENT            , 17                          , NULL                          ,
+                                               R_AMOUNT_CLIENT.NCURRENCY  , NAMOUNT_TOTBOL*(-1)           , DEXPIRDAT                   ,
+                                               INSCOLLECTIONBATCH.SOPTPROCESS);
+
+/*+ SE ACTUALIZA EL EL ESTADO DE PROCESADO EL SALDO A FAVOR EN MOVE_ACC */
+                    UPDATE MOVE_ACC
+                       SET SPROCESS_IND = '1'                          ,
+                           NBULLETINS   = R_AMOUNT_CLIENT.NBULLETINS ,
+                           DCOMPDATE    = SYSDATE                      ,
+                           NUSERCODE    = INSCOLLECTIONBATCH.NUSERCODE
+                     WHERE ROWID = TMOVE_ACC.ROWID;
+                    EXIT;
+
+                EXCEPTION
+                    WHEN OTHERS THEN
+                        SERROR := 'NO ACTUALIZA SALDO A FAVOR EN BOLETIN; ' || TO_CHAR(SQLCODE) || ': ' || SQLERRM;
+                        CRETMP_BATCH_ERR(DLIMIT_DATE   => DEXPIRDAT                                     ,
+                                         NBANK         => NBANK                                          ,
+                                         NCURRENCY     => NCURRENCY                                      ,
+                                         SCLIENT       => R_AMOUNT_CLIENT.SCLIENT                              ,
+                                         NBRANCH       => NBRANCH_p                              ,
+                                         NPOLICY       => 0,--R_AMOUNT_CLIENT.NPOLICY                              ,
+                                         NCERTIF       => 0,--'R_AMOUNT_CLIENT.NCERTIF                              ,
+                                         NRECEIPT      => 0,--R_AMOUNT_CLIENT.NRECEIPT                              ,
+                                         SERROR        => SERROR                                          ,
+                                         DCOMPDATE     => SYSDATE                                         ,
+                                         NUSERCODE     => NUSERCODE                                       ,
+                                         SACCOUNT      => NULL                                            ,
+                                         SKEY          => SKEY                                            ,
+                                         NWAY_PAY      => NWAY_PAY                                        ,
+                                         NINSUR_AREA   => NINSUR_AREA                                     ,
+                                         NBULLETINS    => NBULLETINS                                      ,
+                                         NCOLLECDOCTYP => 0                                               ,
+                                         NBORDEREAUX   => NULL                                            ,
+                                         NCONTRAT      => 0                                               ,
+                                         NDRAFT        => NULL                                           );
+                        RAISE;
+                END;
+           END IF;
+        END LOOP;
+        CLOSE C_AMOUNT_CLIENT;
+    END LOOP;        -- CURSOR C_TMP_MOVE_ACC */
+    COMMIT;
+END INSCOLLECTIONBATCH;
