@@ -1,6 +1,3 @@
-CREATE OR REPLACE NONEDITIONABLE VIEW NS_View_DatosGeneralesPoliza
-AS
--- Se utiliza WITH para mejorar la legibilidad y modularidad de la consulta.
 WITH PolizaMoneda AS (
     -- Subconsulta para obtener la moneda de la póliza de forma determinista,
     -- seleccionando la primera fila en caso de múltiples monedas.
@@ -87,4 +84,3 @@ WHERE
     -- La condición "cert.ncertif=0" es redundante porque ya está en el INNER JOIN.
     -- El "ORDER BY" se ha eliminado de la vista; debe aplicarse en la consulta final.
     -- AND pol.npolicy = 28; -- Condición de prueba comentada.
-;
