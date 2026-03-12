@@ -17,7 +17,8 @@ TasaCambioDolar AS (
     FROM
         -- Se limita el escaneo de pólizas a las que se van a consultar.
         (SELECT SCERTYPE, NBRANCH, NPRODUCT, NPOLICY, DISSUEDAT FROM POLICY WHERE SCERTYPE = '2') p
-    LEFT JOIN EXCHANGE e ON e.NCURRENCY = 2 -- Moneda dólar.
+    LEFT JOIN 
+        EXCHANGE e ON e.NCURRENCY = 2 -- Moneda dólar.
                    AND e.DEFFECDATE <= p.DISSUEDAT -- La fecha de la tasa debe ser anterior o igual a la de emisión.
                    AND (e.DNULLDATE IS NULL OR e.DNULLDATE > p.DISSUEDAT) -- La tasa debe estar vigente.
 )
