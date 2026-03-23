@@ -1,9 +1,9 @@
 CREATE OR REPLACE PROCEDURE INSUDB.NS_INSASEGURADOSVIGENTES513
 /*-------------------------------------------------------------------------------*/
 /* NOMBRE    : NS_INSASEGURADOSVIGENTES513*/
-/* OBJETIVO  : OBTENER INFORMACIÓN LOS ASEGURADOS VIGENTES DE TODAS LAS POLIZAS ACTIVAS A UNA FECHA DADA        */
+/* OBJETIVO  : OBTENER INFORMACIï¿½N LOS ASEGURADOS VIGENTES DE TODAS LAS POLIZAS ACTIVAS A UNA FECHA DADA        */
 /* PARAMETROS: 1 -  DFECHA_HASTA            : FECHA LIMITE DE EMISION D POLIZAS                                 */
-/*             2 -  NCOD_REGIONALPOLIZA   	: COD RREGIONAL DONDE SE EMITIÓ LA POLIZA                           */
+/*             2 -  NCOD_REGIONALPOLIZA   	: COD RREGIONAL DONDE SE EMITIï¿½ LA POLIZA                           */
 /*             3 -  NCOD_RAMO   	        : COD RAMO DE LA POLIZA                                         */
 /*             4 -  NCOD_PRODUCTO   	    : COD PRODUCTO DE LA POLIZA                                         */
 /*             5 -  NCOD_TIPOINTERMEDIARIO  : COD TIPO INTERMEDIARIO DE LA POLIZA                               */
@@ -29,11 +29,13 @@ CREATE OR REPLACE PROCEDURE INSUDB.NS_INSASEGURADOSVIGENTES513
 
 BEGIN
 
-   DELETE  FROM TMP_INT513;
-    --WHERE SKEY = NS_INSASEGURADOSVIGENTES513.SKEY;
-     
-    --DELETE TRACE WHERE NUSERCODE = 15;
-    COMMIT;
+   -- Borrar solo la ejecuciÃ³n sobre la misma llave; si no existe, limpiar tabla de reporte
+   DELETE FROM TIMETMP.TMP_INT513 WHERE SKEY = NS_INSASEGURADOSVIGENTES513.SKEY;
+   IF SQL%ROWCOUNT = 0 THEN
+      DELETE FROM TIMETMP.TMP_INT513;
+   END IF;
+   --DELETE TRACE WHERE NUSERCODE = 15;
+   COMMIT;
 
 INSERT INTO TIMETMP.TMP_INT513
 (
@@ -124,7 +126,8 @@ INSERT INTO TIMETMP.TMP_INT513
             MAX(CASE WHEN TLCOB.NCOVERGEN IN (92200) THEN 'SI' ELSE 'NO' END) AS SeguroAlViajero,
             MAX(CASE WHEN TLCOB.NCOVERGEN IN (92180) THEN CLI.scliename ELSE 'NO CUENTA CON ESTE SERVICIO' END) AS EmergenciaMedicas,
             MAX(CASE WHEN TLCOB.NCOVERGEN IN (92220) THEN 'SI' ELSE 'NO' END) AS MuerteAccidental,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92230) THEN 'SI' ELSE 'NO' END) AS Sepelio
+            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92230) THEN 'SI' ELSE 'NO' END) AS Sepelio,
+            MAX(NVL(BENEF.NDED_TYPE,0)) AS NDEDUCIBLE
         FROM COVER COB
         INNER JOIN LIFE_COVER LCOB ON COB.NBRANCH = LCOB.NBRANCH AND COB.NPRODUCT = LCOB.NPRODUCT AND COB.NCOVER = LCOB.NCOVER AND COB.NMODULEC = LCOB.NMODULEC AND LCOB.DNULLDATE IS NULL
         INNER JOIN TAB_LIFCOV TLCOB ON LCOB.NCOVERGEN = TLCOB.NCOVERGEN
@@ -148,7 +151,7 @@ INSERT INTO TIMETMP.TMP_INT513
             COB.sclient
     ),
     cteEmails AS (
-        -- CTE para obtener el primer correo electrónico por cliente y póliza
+        -- CTE para obtener el primer correo electrï¿½nico por cliente y pï¿½liza
         SELECT
             adrs.sclient,
             adrs.scertype,
@@ -171,7 +174,7 @@ INSERT INTO TIMETMP.TMP_INT513
         INNER JOIN FORMATVALUES tdoc ON cliDoc.ntypclientdoc = tdoc.ntypclientdoc
     ),
     cteOtroSeguro AS (
-        -- CTE para encontrar si un cliente tiene otras pólizas activas
+        -- CTE para encontrar si un cliente tiene otras pï¿½lizas activas
         SELECT
             RAUX.SCLIENT,
             PRODAUX.nproduct,
@@ -193,8 +196,8 @@ INSERT INTO TIMETMP.TMP_INT513
         NS_INSASEGURADOSVIGENTES513.SKEY,
         VPOL.nbranch,
         vPol.SCERTYPE,
-        row_number() over (ORDER BY vpol.nropoliza, cert.ncertif) as NroTotalAsegurado,
-        row_number() over (PARTITION BY vpol.nropoliza ORDER BY vpol.nropoliza) as NroAseguradoPorCuenta,
+        COUNT(*) OVER () AS NroTotalAsegurado,
+        COUNT(*) OVER (PARTITION BY vpol.npolicy) AS NroAseguradoPorCuenta,
         VPOL.nproduct,
         vpol.producto,
         '' AS Plan,
@@ -217,8 +220,8 @@ INSERT INTO TIMETMP.TMP_INT513
         vpol.intermediario,
         NVL(cert.NCAPITAL,0) As CapitalAseguradoMO,
         NVL(cert.NCAPITAL,0) * vpol.tc As CapitalAseguradoLO,
-        'NO APLICA' as NDEDUCIBLE_MO,
-        'NO APLICA' as NDEDUCIBLE_LO,
+        NVL(cd.NDEDUCIBLE, 0) AS NDEDUCIBLE_MO,
+        NVL(cd.NDEDUCIBLE, 0) * vpol.tc AS NDEDUCIBLE_LO,
         TRIM(ambgeo.sdescript) As AmbitoGeografico,
         TRIM(sisate.sdescript) As SistemaAtencion,
         vpol.contratante,
@@ -297,7 +300,8 @@ INSERT INTO TIMETMP.TMP_INT513
     AND TRIM(UPPER(VPOL.ESTADOPOLIZA))= 'ACTIVA' 
     -- AND VPOL.NROPOLIZA in (1016,1152,1180)
     --parametros> 
-    AND TO_DATE(vPol.FechaEmision) <= TO_DATE(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA)
+    /* Fecha de emisiÃ³n vs corte (manejo nativo DATE, evitar conversiones innecesarias) */
+    AND vPol.FechaEmision <= NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA
     AND VPol.CodRegionalPoliza = CASE WHEN NVL(NS_INSASEGURADOSVIGENTES513.NCOD_REGIONALPOLIZA,0)=0 
                                       THEN VPol.CodRegionalPoliza ELSE NS_INSASEGURADOSVIGENTES513.NCOD_REGIONALPOLIZA END                 
     AND vpol.codproducto = CASE WHEN NVL(NS_INSASEGURADOSVIGENTES513.NCOD_PRODUCTO,0)=0 

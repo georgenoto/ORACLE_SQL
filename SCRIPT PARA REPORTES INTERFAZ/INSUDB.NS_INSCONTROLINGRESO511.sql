@@ -148,8 +148,6 @@ BEGIN
 							--, PRE_MO.Dstatdate AS FechaCobro
 							, CREF.DCollect AS FechaCobro
 							, vpol.contratante Cliente  
-							--, VPOL.NroPoliza 
-							--, TRIM(TCuo.sdescript) as TipoCuota
                             , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -167,13 +165,11 @@ BEGIN
 							, Fpag2.sdescript   as FormaCobroRealizado
 							, CREF.NBordereaux As NroRelacionCompensacion
 							, To_char(TRIM(VPOL.CanalCobroAsignado)) || '- Poliza :'|| To_char(TRIM(VPOL.NroPoliza)) || ' ' || To_char(TRIM(pre.NPeriod)) As Concepto
-							, Vpol.FrecuenciaPago as Perioricidad
-							--fpag2.nmov_type= 3 Transferencia bancaria                 
+							, Vpol.FrecuenciaPago as Perioricidad                 
 							,  bco.sdescript  As Banco
                             , '' As NroCuenta
 							,  ''  As CodigoTransaccion  
 							,  CASE mcash.nmov_type WHEN 2 THEN TO_CHAR(mcash.sdocnumbe) ELSE '' END  As NroCheque --2:= cheque
-							--,  mcash.ddoc_date  As FechaDeposito
 							, CASE mcash.nmov_type 
 								WHEN 2 THEN mcash.ddoc_date  -- Cheque
 								WHEN 27 THEN mcash.ddoc_date  -- Voucher ATC
@@ -199,7 +195,6 @@ BEGIN
 							, 0 As SaldoFavorML
 							, 0 As RegularizacionSaldoMO
 							, 0 As RegularizacionSaldoML
-							--, NVL(PRE_MO.NEXCHANGE,0) TipoCambio
 							, tblTipoCambio.TC as TipoCambio
 							, VPol.CodTipoIntermediario
 							, VPOL.TipoIntermediario As TipoIntermediario
@@ -255,7 +250,8 @@ BEGIN
                         
                        WHERE VPOL.codFrecuenciaPago <> 8 -- CON FINANCIAMIENTO   
                         AND pre.nstatus_pre in (2,5,6,7)
-                        --AND CREF.DCollect BETWEEN '01/01/2026' AND '15/01/2026'		
+                        
+                        -- AND CREF.DCollect BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  		
                         
                     --parametros>                  
                         AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
@@ -284,7 +280,6 @@ BEGIN
                             , VPOL.npolicy
                             , Vpol.FrecuenciaPago
                             , pre.Nreceipt               
-                            --, tblFactura.NidTransaction
                             , 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
                             , '145776027' AS NitEmpresa
                             , VPOL.LineaNegocio
@@ -302,8 +297,6 @@ BEGIN
                             --, PRE_MO.Dstatdate AS FechaCobro
                             , CREF.DCollect AS FechaCobro
                             , vpol.contratante Cliente  
-                            --, VPOL.NroPoliza 
-                            --, TRIM(TCuo.sdescript) as TipoCuota
                             , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -321,8 +314,7 @@ BEGIN
                             ,  Fpag3.sdescript  as FormaCobroRealizado
                             , CREF.NBordereaux As NroRelacionCompensacion
                             , To_char(TRIM(VPOL.CanalCobroAsignado)) || '- Poliza :'|| To_char(TRIM(VPOL.NroPoliza)) || ' ' || To_char(TRIM(pre.NPeriod)) As Concepto
-                            , Vpol.FrecuenciaPago as Perioricidad
-                            --fpag2.nmov_type= 3 Transferencia bancaria                 
+                            , Vpol.FrecuenciaPago as Perioricidad                
                             , Bco2.sdescript  As Banco
                             , CLEANSTRING(EXTENCRYPTION.DECRYPTDATA(BAcc.SACC_NUMBER)) As NroCuenta
                             , TO_CHAR(BMov.sdep_number)  As CodigoTransaccion
@@ -342,7 +334,6 @@ BEGIN
                             , 0 As SaldoFavorML
                             , 0 As RegularizacionSaldoMO
                             , 0 As RegularizacionSaldoML
-                            --, NVL(PRE_MO.NEXCHANGE,0) TipoCambio
                             , tblTipoCambio.TC as TipoCambio
                             , VPol.CodTipoIntermediario
                             , VPOL.TipoIntermediario As TipoIntermediario
@@ -400,8 +391,8 @@ BEGIN
                         
                        WHERE VPOL.codFrecuenciaPago <> 8 -- CON FINANCIAMIENTO   
                         AND pre.nstatus_pre in (2,5,6,7)
-                        --AND CREF.DCollect BETWEEN '01/01/2026' AND '15/01/2026'		
-                        
+                       		
+                    --   AND CREF.DCollect BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
                     --parametros>                  
                         AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
                         AND pre.noffice = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN VPol.CodRegionalPoliza ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
@@ -428,7 +419,6 @@ BEGIN
 							, VPOL.npolicy
 							, Vpol.FrecuenciaPago
 							, pre.Nreceipt                
-							--, tblFactura.NidTransaction
 							, 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
 							, '145776027' AS NitEmpresa
 							, VPOL.LineaNegocio
@@ -445,8 +435,6 @@ BEGIN
 							, TRIM(MPag.sdescript) as CanalCobroRealizado
 							, CREF.DCollect AS FechaCobro
 							, vpol.contratante Cliente  
-							--, VPOL.NroPoliza 
-							--, TRIM(TCuo.sdescript) as TipoCuota
                             , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -464,8 +452,7 @@ BEGIN
 							, Fpag2.sdescript   as FormaCobroRealizado
 							, CREF.NBordereaux As NroRelacionCompensacion
 							, To_char(TRIM(VPOL.CanalCobroAsignado)) || '- Poliza :'|| To_char(TRIM(VPOL.NroPoliza)) || ' ' || To_char(TRIM(CASE  WHEN Pre.ncontrat IS NULL THEN pre.NPeriod ELSE FDRA.Ndraft  END)) As Concepto
-							, Vpol.FrecuenciaPago as Perioricidad
-							--fpag2.nmov_type= 3 Transferencia bancaria                 
+							, Vpol.FrecuenciaPago as Perioricidad                 
 							,  bco.sdescript  As Banco
                             ,  '' As NroCuenta
 							,  ''  As CodigoTransaccion  --2:= cheque
@@ -497,7 +484,6 @@ BEGIN
 							, 0 As SaldoFavorML
 							, 0 As RegularizacionSaldoMO
 							, 0 As RegularizacionSaldoML
-							--, NVL(TDOC.NEXCHANGE,0) TipoCambio
 							, tblTipoCambio.TC as TipoCambio
 							, VPol.CodTipoIntermediario
 							, VPOL.TipoIntermediario As TipoIntermediario
@@ -553,8 +539,9 @@ BEGIN
 
 						WHERE   VPOL.codFrecuenciaPago= 8 -- CON FINANCIAMIENTO
 						and pre.nstatus_pre in (8)
-						--AND CREF.DCollect BETWEEN '01/12/2025' AND '31/01/2026'
-                        
+						
+                        --AND CREF.DCollect BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
+
                         --PARAMETROS>                  
                         AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
                         AND pre.noffice = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN VPol.CodRegionalPoliza ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
@@ -596,8 +583,6 @@ BEGIN
 						, TRIM(MPag.sdescript) as CanalCobroRealizado
 						, CREF.DCollect AS FechaCobro
 						, vpol.contratante Cliente  
-						--, VPOL.NroPoliza 
-						--, TRIM(TCuo.sdescript) as TipoCuota
                         , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -636,7 +621,6 @@ BEGIN
 						, 0 As SaldoFavorML
 						, 0 As RegularizacionSaldoMO
 						, 0 As RegularizacionSaldoML
-						--, NVL(TDOC.NEXCHANGE,0) TipoCambio
 						, tblTipoCambio.TC as TipoCambio
 						, VPol.CodTipoIntermediario
 						, VPOL.TipoIntermediario As TipoIntermediario
@@ -691,9 +675,10 @@ BEGIN
 					
 					WHERE   VPOL.codFrecuenciaPago= 8 -- CON FINANCIAMIENTO
 					and pre.nstatus_pre in (8)                 
-					AND CREF.DCollect BETWEEN '01/12/2025' AND '15/01/2026'
-
-					--PARAMETROS>                  
+					
+                    --AND CREF.DCollect BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
+					
+                    --PARAMETROS>                  
 					AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
 					AND pre.noffice = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN VPol.CodRegionalPoliza ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
 					AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
@@ -720,7 +705,6 @@ BEGIN
                             , VPOL.npolicy
                             , Vpol.FrecuenciaPago
                             , pre.Nreceipt               
-                            --, tblFactura.NidTransaction
                             , 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
                             , '145776027' AS NitEmpresa
                             , VPOL.LineaNegocio
@@ -738,8 +722,6 @@ BEGIN
                             , PRE_MO.Dcompdate AS FechaCobro
                             --, CREF.DCollect AS FechaCobro
                             , vpol.contratante Cliente  
-                            --, VPOL.NroPoliza 
-                            --, TRIM(TCuo.sdescript) as TipoCuota
                             , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -757,8 +739,7 @@ BEGIN
                             --, CASE WHEN mcash.nbordereaux IS NOT NULL THEN Fpag2.sdescript ELSE Fpag3.sdescript END  as FormaCobroRealizado
                             , pre_mo.NBordereaux As NroRelacionCompensacion
                             , To_char(TRIM(VPOL.CanalCobroAsignado)) || '- Poliza :'|| To_char(TRIM(VPOL.NroPoliza)) || ' ' || To_char(TRIM(pre.NPeriod)) As Concepto
-                            , Vpol.FrecuenciaPago as Perioricidad
-                            --fpag2.nmov_type= 3 Transferencia bancaria                 
+                            , Vpol.FrecuenciaPago as Perioricidad                 
                             , CASE WHEN fpag2.nmov_type= 3 then Bco2.sdescript  else bco.sdescript end As Banco
                             , '' As NroCuenta
                             , '' As CodigoTransaccion
@@ -775,7 +756,6 @@ BEGIN
                             , 0 As SaldoFavorML
                             , 0 As RegularizacionSaldoMO
                             , 0 As RegularizacionSaldoML
-                            --, NVL(PRE_MO.NEXCHANGE,0) TipoCambio
                             , tblTipoCambio.TC as TipoCambio
                             , VPol.CodTipoIntermediario
                             , VPOL.TipoIntermediario As TipoIntermediario
@@ -835,7 +815,8 @@ BEGIN
                         
                        WHERE VPOL.codFrecuenciaPago <> 8 -- CON FINANCIAMIENTO   
                         AND pre.nstatus_pre in (10) --Pendiente Fact. Anticipada   
-                        --AND  PRE_MO.Dcompdate BETWEEN '01/01/2026' AND '15/01/2026'
+                        
+                        --AND PRE_MO.Dcompdate BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
                         
                         --PARAMETROS>                  
                         AND  TO_DATE(TO_CHAR(PRE_MO.Dcompdate, 'DD-MM-YYYY')) BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
@@ -881,8 +862,6 @@ BEGIN
                             , TRIM(MPag.sdescript) as CanalCobroRealizado
                             , DRA_HIS.dcompdate AS FechaCobro
                             , vpol.contratante Cliente  
-                            --, VPOL.NroPoliza 
-                            --, TRIM(TCuo.sdescript) as TipoCuota
                             , CASE PRE.NTRATYPEI 
                                    WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                                    WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
@@ -919,7 +898,6 @@ BEGIN
                             , 0 As SaldoFavorML
                             , 0 As RegularizacionSaldoMO
                             , 0 As RegularizacionSaldoML
-                            --, NVL(TDOC.NEXCHANGE,0) TipoCambio
                             , tblTipoCambio.TC as TipoCambio
                             , VPol.CodTipoIntermediario
                             , VPOL.TipoIntermediario As TipoIntermediario
@@ -977,7 +955,8 @@ BEGIN
                         
                         WHERE   VPOL.codFrecuenciaPago= 8 -- CON FINANCIAMIENTO
                         AND pre.nstatus_pre in (8)    --Financiado                                                 
-                         -- AND DRA_HIS.dcompdate BETWEEN '01/01/2026' AND '15/01/2026'
+                         
+                        --AND DRA_HIS.dcompdate BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
                           
                           --PARAMETROS>                  
                         AND TO_DATE(TO_CHAR(DRA_HIS.dcompdate, 'DD-MM-YYYY')) BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
