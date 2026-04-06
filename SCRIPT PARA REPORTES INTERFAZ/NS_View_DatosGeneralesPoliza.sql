@@ -96,5 +96,6 @@ FROM
     LEFT JOIN INTERM_TYP TInte ON Inte.NINTERTYP = TInte.NINTERTYP
 
 WHERE
-    pol.SCERTYPE = '2';
+    pol.SCERTYPE = '2'
+    and pol.SSTATUS_POL NOT IN (2,3,6,7,8);
     -- AND pol.npolicy = 28; 

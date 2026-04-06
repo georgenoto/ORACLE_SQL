@@ -74,10 +74,11 @@ BEGIN
           NINTERTYP,		--- COD. TIPO INTERMEDIARIO
           SDESINTERTYP,	--- DESC. TIPO INTERMEDIARIO
           NINTERMED,		--- COD.  INTERMEDIARIO
-          SDESINTERMED--- NOMBRE INTERMEDIARIO
+          SDESINTERMED,--- NOMBRE INTERMEDIARIO
+          SSTATUSVA_CERTIF  --- ESTADO DEL CERTIFICADO
         )
         select  
-            NS_INSASEGURADOSTODOS512.SKEY
+              NS_INSASEGURADOSTODOS512.SKEY
             , VPOL.SCertype
             , VPOL.nbranch
             , VPOL.nproduct
@@ -89,9 +90,13 @@ BEGIN
             , vpol.TipoDistribucion
             --, Vpol.FrecuenciaPago
             , TRIM(ambgeo.sdescript) As AmbitoGeografico
-            , TRIM(sisate.sdescript) As SistemaAtencion
+            , TRIM(sisate.sdescript) As SistemaAtencion           
             , vpol.codestadopoliza
-            , vpol.estadopoliza
+            ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSTODOS512.DENDDATE , 'YYYYMMDD') 
+                THEN 'Vencida' 
+                ELSE vpol.estadopoliza  
+               END) as estadopoliza
+            --, vpol.estadopoliza
             , vpol.iniciovigenciapoliza As InicioVigenciaPoliza
             , vpol.finvigenciapoliza As FinVigenciaPoliza
             , vpol.codContratante
@@ -112,10 +117,13 @@ BEGIN
             , TPer.sdescript TipoPersona    
             , tblDocumento.codtipodocumento
             , tblDocumento.nrodocumento
-            , tblDocumento.Complemento    
-            , CASE WHEN rolAse.nstatusrol=1 
-               THEN CASE WHEN rolAse.Dnulldate is null THEN TRIM(ease.sdescript) ELSE 'Excluido' END  
-               ELSE TRIM(ease.sdescript) END as EstadoAsegurado
+            , tblDocumento.Complemento  
+            ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSTODOS512.DENDDATE , 'YYYYMMDD') 
+                THEN 'Vencida'
+                ELSE    CASE WHEN rolAse.nstatusrol=1 
+                           THEN CASE WHEN rolAse.Dnulldate is null THEN TRIM(ease.sdescript) ELSE 'Excluido' END  
+                           ELSE TRIM(ease.sdescript) END 
+               END)   as EstadoAsegurado
             , TRIM(cresi.sdescript) as CiudadResidencia
             , TRIM(pres.sdescript) as PaisResidencia
             , rolAse.deffecdate as FechaIngreso
@@ -123,12 +131,13 @@ BEGIN
             , tblCorreo.EmailAsegurado
             , aseg.dinpdate As FechaCreacionUsuario
             , clicre.scliename As UsuarioCreacion
-            , rolAse.dcompdate As FechaModificacion
-            , cliMod.scliename As UsuarioModificacion
+            , aseg.dcompdate As FechaModificacion
+            , clicre.scliename As UsuarioModificacion
             , vpol.codtipointermediario
             , vpol.TipoIntermediario
             , vpol.codintermediario
-            , vpol.intermediario  
+            , vpol.intermediario
+            , ECert.sdescript As EstadoCertificado  
                            
             FROM NS_View_DatosGeneralesPoliza vpol
             INNER JOIN Certificat cert On vpol.scertype= Cert.scertype and vpol.Nbranch= Cert.NBranch 
@@ -136,7 +145,7 @@ BEGIN
             INNER JOIN ROLES rolAse ON  Cert.Scertype=rolAse.Scertype and Cert.NBranch=rolAse.NBranch 
                                         and Cert.Nproduct=rolAse.Nproduct and Cert.NPolicy=rolAse.NPolicy
                                         and cert.ncertif= rolAse.ncertif
-                                        AND rolAse.NROLE      NOT IN (1,13,25,87)--AND rolAse.NROLE       IN  (2, 23, 22, 21, 24, 27, 60, 30, 29, 28)
+                                        AND rolAse.NROLE      NOT IN (1,13,25,87,91)--AND rolAse.NROLE       IN  (2, 23, 22, 21, 24, 27, 60, 30, 29, 28)
             INNER JOIN Client aseg on rolAse.sclient = aseg.sclient
             OUTER APPLY (
                 select adrs.se_mail EmailAsegurado
@@ -161,6 +170,7 @@ BEGIN
             LEFT JOIN table18 sexo ON rolAse.ssexclien= sexo.ssexclien
             LEFT JOIN table9 cresi On rolAse.ncity_residence= cresi.noffice
             LEFT JOIN Table5006 TPer On aseg.nperson_typ= tper.nperson_typ
+            LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
             CROSS APPLY(
                 select clidoc.ntypclientdoc codTipoDocumento, clidoc.sclinumdocu nroDocumento, tdoc.sshort_des tipoDocumentoCorto
                 , clidoc.sidcompl Complemento
@@ -173,16 +183,17 @@ BEGIN
             LEFT JOIN USERS usrCre ON aseg.NUSERCODE= usrCre.NUSERCODE
             LEFT JOIN CLIENT cliCre On usrCre.SClient= cliCre.SClient  
             
-            LEFT JOIN USERS usrMod ON rolAse.NUSERCODE= usrMod.NUSERCODE
-            LEFT JOIN CLIENT cliMod On usrMod.SClient= cliMod.SClient  
+            --LEFT JOIN USERS usrMod ON rolAse.NUSERCODE= usrMod.NUSERCODE
+            --LEFT JOIN CLIENT cliMod On usrMod.SClient= cliMod.SClient  
                         
         WHERE    vPol.SCERTYPE =   '2'  
+        AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
         --AND VPOL.NROPOLIZA in (1054,1016)
-        --parametros>                  
-        AND TO_DATE(TO_CHAR(vpol.fechaemision, 'DD-MM-YYYY'))  BETWEEN NS_INSASEGURADOSTODOS512.DINIDATE AND NS_INSASEGURADOSTODOS512.DENDDATE 
-        AND vpol.CodRegionalPoliza = CASE WHEN NVL(NS_INSASEGURADOSTODOS512.NOFFICE,0)=0 THEN vpol.CodRegionalPoliza ELSE NS_INSASEGURADOSTODOS512.NOFFICE END
-        
-        ORDER BY vpol.nropoliza,rolase.ncertif ;      
+        --parametros>                              
+        AND TO_CHAR(vpol.fechaemision , 'YYYYMMDD') BETWEEN  TO_CHAR(NS_INSASEGURADOSTODOS512.DINIDATE , 'YYYYMMDD')  AND TO_CHAR(NS_INSASEGURADOSTODOS512.DENDDATE, 'YYYYMMDD') 
+        --AND TO_DATE(TO_CHAR(vpol.fechaemision, 'DD-MM-YYYY'))  BETWEEN NS_INSASEGURADOSTODOS512.DINIDATE AND NS_INSASEGURADOSTODOS512.DENDDATE 
+        AND vpol.CodRegionalPoliza = CASE WHEN NVL(NS_INSASEGURADOSTODOS512.NOFFICE,0)=0 THEN vpol.CodRegionalPoliza ELSE NS_INSASEGURADOSTODOS512.NOFFICE END;
+           
 
 
 COMMIT;
