@@ -40,18 +40,18 @@ BEGIN
 INSERT INTO TIMETMP.TMP_INT513
 (
   SKEY,
-  NCODRAMO,                  ---  NBRANCH
-  SCOD_TIPO_CERTIFICADO,      --   SCERTYPE
+  NCODRAMO,                  
+  SCOD_TIPO_CERTIFICADO,      
   NNRO_TOTAL_ASEGURADO,
   NNRO_TOTAL_ASEGURADOXCUENTA,
   NCOD_PRODUCTO,
-  SPRODUCTO,                -- NPRODUCT
-  SDESCRIPCION_ABREVIADA, -- NUEVO CAMPO 
+  SPRODUCTO,               
+  SDESCRIPCION_ABREVIADA,  
   SPLAN,
   STIPO_POLIZA,
   STIPO_FACT_COLECTIVO,	
   STIPO_DISTRIBUCION,	     
-  NNRO_POLIZA,             --NPOLICY
+  NNRO_POLIZA,          
   NCOD_MONEDA_POL,
   SMONEDA_POL,
   DFEC_EMISION_POL,
@@ -89,8 +89,8 @@ INSERT INTO TIMETMP.TMP_INT513
   DFEC_INGRESO_ASEG,
   DFEC_ANTIGUEDAD_ASEG,  
   NCAPITAL_ANTIGUEDAD_ASEG,
-  DFEC_INCLUSION_ASEG ,  -- nuevo
-  DFEC_EXCLUSION_ASEG, -- nuevo
+  DFEC_INCLUSION_ASEG ,  
+  DFEC_EXCLUSION_ASEG, 
   SCORREO_ASEG ,    
   SEXCLUSIONES_PARTICULARES,
   SCARENCIAS_PARTICULARES,
@@ -138,15 +138,17 @@ INSERT INTO TIMETMP.TMP_INT513
             MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) THEN COB.DANTIDATE ELSE NULL END) AS FechaAntiguedad,
             MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) THEN COB.NANTI_AMOUNT ELSE NULL END) AS CapitalAntiguedad
         FROM COVER COB
-        INNER JOIN LIFE_COVER LCOB ON COB.NBRANCH = LCOB.NBRANCH AND COB.NPRODUCT = LCOB.NPRODUCT AND COB.NCOVER = LCOB.NCOVER AND COB.NMODULEC = LCOB.NMODULEC AND LCOB.DNULLDATE IS NULL
+        INNER JOIN LIFE_COVER LCOB ON COB.NBRANCH = LCOB.NBRANCH AND COB.NPRODUCT = LCOB.NPRODUCT 
+                                        AND COB.NCOVER = LCOB.NCOVER AND COB.NMODULEC = LCOB.NMODULEC 
+                                        AND LCOB.DNULLDATE IS NULL
         INNER JOIN TAB_LIFCOV TLCOB ON LCOB.NCOVERGEN = TLCOB.NCOVERGEN
-        LEFT JOIN TAB_MEDBENEFITS BENEF
-            ON COB.NBRANCH = BENEF.NBRANCH AND COB.NPRODUCT = BENEF.NPRODUCT AND COB.NPOLICY = BENEF.NPOLICY AND COB.NCERTIF = BENEF.NCERTIF
-            AND COB.NMODULEC = BENEF.NMODULEC AND COB.NCOVER = BENEF.NCOVER AND COB.SCLIENT = BENEF.SCLIENT AND BENEF.DNULLDATE IS NULL
+        LEFT JOIN TAB_MEDBENEFITS BENEF  ON COB.NBRANCH = BENEF.NBRANCH AND COB.NPRODUCT = BENEF.NPRODUCT 
+                                        AND COB.NPOLICY = BENEF.NPOLICY AND COB.NCERTIF = BENEF.NCERTIF
+                                        AND COB.NMODULEC = BENEF.NMODULEC AND COB.NCOVER = BENEF.NCOVER AND COB.SCLIENT = BENEF.SCLIENT AND BENEF.DNULLDATE IS NULL
         LEFT JOIN LEND_AGREE_PRES LAGRE
-            ON COB.scertype = LAGRE.scertype AND COB.nbranch = LAGRE.nbranch AND COB.nproduct = LAGRE.nproduct AND COB.npolicy = LAGRE.npolicy
-            AND COB.nmodulec = LAGRE.nmodulec AND COB.sclient = LAGRE.sclient AND COB.ngroup_insu = LAGRE.ngroup AND COB.NCOVER = LAGRE.NCOVER
-            AND LAGRE.dnulldate IS NULL
+                                        ON COB.scertype = LAGRE.scertype AND COB.nbranch = LAGRE.nbranch AND COB.nproduct = LAGRE.nproduct AND COB.npolicy = LAGRE.npolicy
+                                        AND COB.nmodulec = LAGRE.nmodulec AND COB.sclient = LAGRE.sclient AND COB.ngroup_insu = LAGRE.ngroup AND COB.NCOVER = LAGRE.NCOVER
+                                        AND LAGRE.dnulldate IS NULL
         LEFT JOIN AGREEMENT AGRE ON LAGRE.ncod_agree = AGRE.ncod_agree
         LEFT JOIN CLIENT CLI ON AGRE.sclient = CLI.sclient
         WHERE COB.dnulldate IS NULL
@@ -164,7 +166,8 @@ INSERT INTO TIMETMP.TMP_INT513
                  M.NPRODUCT, M.NMODULEC, M.NPOLICY, M.NCERTIF, M.SCLIENT,
                  MAX(CASE WHEN TL.NCOVERGEN IN (92000) AND M.NBENEFCATEG = 11 AND M.SBENEFCATEG_CODE = 'TA0001' THEN NVL(M.NPERCEN_HOSPITAL,0) ELSE 0 END) AS porcentajehospitalario,
                  MAX(CASE WHEN TL.NCOVERGEN IN (92000) AND M.NBENEFCATEG = 11 AND M.SBENEFCATEG_CODE = 'TA0002' THEN NVL(M.NPERCEN_AMBULATORY,0) ELSE 0 END) AS porcentajeambulatorio,
-                 MAX(CASE WHEN TL.NCOVERGEN IN (92000) AND M.NBENEFCATEG = 8 AND M.SBENEFCATEG_CODE = '23' THEN NVL(M.NPERCEN_AMBULATORY,0) ELSE 0 END) AS PorcAmbulatorioMedicamentos                                             
+                 MAX(CASE WHEN TL.NCOVERGEN IN (92000) AND M.NBENEFCATEG = 8 AND M.SBENEFCATEG_CODE = '23' THEN NVL(M.NPERCEN_AMBULATORY,0) ELSE 0 END) AS PorcAmbulatorioMedicamentos,                                             
+                 MAX(CASE WHEN TL.NCOVERGEN IN (92000) AND M.NBENEFCATEG = 9 AND M.SBENEFCATEG_CODE = '1010' THEN NVL(M.NAMOUNT_COPAY,0) ELSE 0 END) AS Consulta_Coaseguro  
             FROM TAB_MEDBENEFITS M
             INNER JOIN LIFE_COVER LC ON M.NBRANCH= LC.NBRANCH AND M.NCOVER = LC.NCOVER AND M.NPRODUCT = LC.NPRODUCT AND M.NMODULEC= LC.NMODULEC
             INNER JOIN TAB_LIFCOV TL ON LC.NCOVERGEN = TL.NCOVERGEN
@@ -173,10 +176,7 @@ INSERT INTO TIMETMP.TMP_INT513
             WHERE M.DNULLDATE IS NULL
               AND TL.NCOVERGEN IN (92000)
               AND M.SCERTYPE = 2
-              GROUP BY M.NPRODUCT, M.NMODULEC, M.NPOLICY, M.NCERTIF, M.SCLIENT
-            --  AND TL.NCOVERGEN IN (92250, 92000, 92190, 92191, 92200, 92180, 92220, 92230)
-            --  AND M.NBRANCH = :nbranch
-            --  AND M.NCERTIF = :ncertif
+              GROUP BY M.NPRODUCT, M.NMODULEC, M.NPOLICY, M.NCERTIF, M.SCLIENT            
     ) ,
     cteEmails AS (
         -- CTE para obtener el primer correo electr�nico por cliente y p�liza
@@ -254,6 +254,21 @@ INSERT INTO TIMETMP.TMP_INT513
        INNER JOIN TABLE9216 T9216 ON evaRol.NMEDICALSTAT= T9216.NMEDICALSTAT 
        WHERE evaRol.NMEDICALSTAT NOT IN (1) 
        AND evaRol.NROLE NOT IN (1,13,25,87)
+    ),cteExclusionesCarencia as (
+            SELECT excl.scertype,excl.NBranch,excl.NProduct,excl.NPolicy,excl.sclient 
+                ,SUBSTR(LISTAGG( TRIM(CASE WHEN excl.STYPE_EXC=1 
+                                      THEN TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)                     
+                                      END ), ', ') WITHIN GROUP(ORDER BY excl.NPolicy,excl.sclient), 1, 200) AS Exclusiones
+                ,SUBSTR(LISTAGG( TRIM(CASE WHEN excl.STYPE_EXC=2 THEN
+                                              CASE WHEN (excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NOT NULL ) THEN TRIM(desExc.sdescript)  || ' Desde: ' || TO_CHAR( NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY')  || ' Hasta: ' || TO_CHAR( NVL(excl.DEND_DATE, SYSDATE), 'DD-MM-YYYY')|| ' ' || TRIM(excl.sdescript)
+                                                 WHEN (excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NULL) THEN  TRIM(desExc.sdescript)  || ' Desde: ' || TO_CHAR( NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY')  || ' ' || TRIM(excl.sdescript)                 
+                                                 ELSE TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)
+                                                 END                    
+                                      END ), ', ') WITHIN GROUP(ORDER BY excl.NPolicy,excl.sclient), 1, 200) AS CarenciasParticulares
+                FROM TAB_AM_EXC excl 
+                LEFT JOIN TAB_AM_ILL desExc On excl.SILLNESS= desExc.SILLNESS    
+                WHERE  excl.DNULLDATE IS NULL
+                GROUP BY excl.scertype, excl.NBranch, excl.NProduct, excl.NPolicy, excl.sclient
     )
     SELECT
         NS_INSASEGURADOSVIGENTES513.SKEY,
@@ -318,22 +333,8 @@ INSERT INTO TIMETMP.TMP_INT513
         rolAse.deffecdate as FechaInclusion, 
         rolAse.dnulldate as FechaExclusion,        
         tblCorreo.EmailAsegurado,
-        CASE WHEN excl.STYPE_EXC=1 THEN
-            CASE WHEN (NVL(excl.DINIT_DATE,'')<>'' AND NVL(excl.DEND_DATE,'')<>'' ) THEN (TRIM(desExc.sdescript)  || ' Desde: ' || excl.DINIT_DATE  || ' Hasta: ' || excl.DEND_DATE) || ' ' || TRIM(excl.sdescript)
-                 WHEN (NVL(excl.DINIT_DATE,'')<>'') THEN  TRIM(desExc.sdescript)  || ' Desde: ' || excl.DINIT_DATE || ' ' || TRIM(excl.sdescript)
-                 WHEN (NVL(excl.DEND_DATE,'')<>'') THEN  TRIM(desExc.sdescript)  || ' Hasta: ' || excl.DEND_DATE || ' ' || TRIM(excl.sdescript)
-                 ELSE TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)
-                 END
-         END  Exclusiones,
-         CASE WHEN excl.STYPE_EXC=2 THEN
-            CASE WHEN (NVL(excl.DINIT_DATE,'')<>'' AND NVL(excl.DEND_DATE,'')<>'' ) THEN (TRIM(desExc.sdescript)  || ' Desde: ' || excl.DINIT_DATE  || ' Hasta: ' || excl.DEND_DATE)|| ' ' || TRIM(excl.sdescript)
-                 WHEN (NVL(excl.DINIT_DATE,'')<>'') THEN  TRIM(desExc.sdescript)  || ' Desde: ' || excl.DINIT_DATE || ' ' || TRIM(excl.sdescript)
-                 WHEN (NVL(excl.DEND_DATE,'')<>'') THEN  TRIM(desExc.sdescript)  || ' Hasta: ' || excl.DEND_DATE  || ' ' || TRIM(excl.sdescript)
-                 ELSE TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)
-                 END
-         END  CarenciasParticulares,
-        
-        --NULL AS CarenciasParticulares, 
+        EXCL.Exclusiones,
+        EXCL.CarenciasParticulares,        
         tblInfo.InfoEspecial AS InformacionEspecial, 
         NVL(tblOtroSeguro.SDESCRIPT,'NO') As OtroSeguro,
         NVL(cd.TieneMaternidad,'NO') AS TieneMaternidad,
@@ -341,14 +342,21 @@ INSERT INTO TIMETMP.TMP_INT513
         NVL(tblBene.porcentajehospitalario,0) AS porcentajehospitalario,        
         NVL(tblBene.PorcAmbulatorioMedicamentos,0) AS PorcAmbulatorioMedicamentos,
         NVL(cd.TieneOdontologia,'NO') AS TieneOdontologia,
-        cd.coaseguroodontologico,
+         CASE WHEN NVL(cd.coaseguroodontologico,0) <> 0 THEN 
+                            CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'  
+                            ELSE '$US.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'   END 
+        ELSE '' END,
+        --cd.coaseguroodontologico,
         cd.clinicaodontologica,
         NVL(cd.SeguroAlViajero,'NO') AS SeguroAlViajero,
         NVL(cd.EmergenciaMedicas,'NO') AS EmergenciaMedicas,
         NVL(cd.MuerteAccidental,'NO') AS MuerteAccidental,
         NVL(cd.Sepelio,'NO') AS Sepelio,
         null as FechaFinCredencial,
-        '' As Condiciones,
+        CASE WHEN NVL(tblBene.Consulta_Coaseguro,0) <> 0 THEN 
+                            CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'  
+                            ELSE '$US.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'   END 
+        ELSE '' END As Condiciones,
         '' As Observaciones,
         CASE WHEN vpol.CodMonedaPoliza = 1 THEN 1 ELSE Tasa.TC_DOLAR END AS TIPO_CAMBIO,
         ECert.sdescript As EstadoCertificado
@@ -377,10 +385,6 @@ INSERT INTO TIMETMP.TMP_INT513
     LEFT JOIN table18 sexo ON rolAse.ssexclien= sexo.ssexclien
     LEFT JOIN table9 cresi On rolAse.ncity_residence= cresi.noffice
     LEFT JOIN Table5006 TPer On aseg.nperson_typ= tper.nperson_typ
-    LEFT JOIN TAB_AM_EXC excl ON Cert.scertype= excl.scertype and Cert.Nbranch= excl.NBranch
-                               and Cert.NProduct= excl.NProduct and Cert.NPolicy = excl.NPolicy
-                               and aseg.sclient = excl.sclient
-    LEFT JOIN TAB_AM_ILL desExc On excl.SILLNESS= desExc.SILLNESS
     LEFT JOIN cteEmails tblCorreo ON tblCorreo.sclient = aseg.sclient AND tblCorreo.scertype = vpol.scertype AND tblCorreo.npolicy = vpol.npolicy AND tblCorreo.rn = 1
     LEFT JOIN cteDocCliente tblDocumento ON tblDocumento.sclient = rolAse.sclient AND tblDocumento.rn = 1
     LEFT JOIN cteOtroSeguro tblOtroSeguro ON tblOtroSeguro.SCLIENT = ASEG.SCLIENT AND tblOtroSeguro.nproduct <> vpol.nproduct AND tblOtroSeguro.rn = 1
@@ -396,7 +400,9 @@ INSERT INTO TIMETMP.TMP_INT513
                                        and aseg.sclient = tblInfo.sclient
                                        and tblInfo.rn=1
                                        --and cert.NRole = tblInfo.NRole
-                                                   
+    LEFT JOIN cteExclusionesCarencia EXCL ON  Cert.scertype= excl.scertype  AND Cert.Nbranch= excl.NBranch
+                                                AND Cert.NProduct=excl.NProduct AND Cert.NPolicy = excl.NPolicy
+                                                AND aseg.sclient=excl.sclient                                             
     LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
     WHERE vPol.SCERTYPE = '2' 
     AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
