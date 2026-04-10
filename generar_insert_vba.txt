@@ -1,0 +1,92 @@
+Sub GenerarInsert()
+    Dim wsData As Worksheet
+    Dim wsRegion As Worksheet
+    Dim wsRoles As Worksheet
+    Dim wsInsert As Worksheet
+    Dim lastRowData As Long
+    Dim lastRowRegion As Long
+    Dim lastRowRole As Long
+    Dim i As Long
+    Dim j As Long
+    Dim k As Long
+    Dim insertSQL As String
+    Dim columns As String
+    Dim values As String
+    Dim outRow As Long
+    Dim roleValue As String
+    Dim officeValue As String
+    Dim rowData As Range
+    
+    Set wsData = ThisWorkbook.Sheets("Sheet1")
+    Set wsRegion = ThisWorkbook.Sheets("REGIONALES")
+    Set wsRoles = ThisWorkbook.Sheets("ROLES")
+    
+    On Error Resume Next
+    Set wsInsert = ThisWorkbook.Sheets("INSERT")
+    If wsInsert Is Nothing Then
+        Set wsInsert = ThisWorkbook.Sheets.Add
+        wsInsert.Name = "INSERT"
+    End If
+    On Error GoTo 0
+    
+    wsInsert.Cells.Clear
+    
+    columns = "NBRANCH, DESCRIPCION, NPRODUCT, DEFFECDATE, NMODULEC, NCOVER, NROLE, NOFFICE, NGEOGRAPHAREA, NATTENSYSTEM, NCAPITAL_INIT, NCURRENCY, NAGE_INIT, NAGE_END, NAMOUNTM, NAMOUNTF, NPOLICY_YEAR_INIT, NPOLICY_YEAR_END, NCAPITAL_END, DNULLDATE, DCOMPDATE, NUSERCODE"
+    
+    lastRowData = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
+    lastRowRegion = wsRegion.Cells(wsRegion.Rows.Count, 1).End(xlUp).Row
+    lastRowRole = wsRoles.Cells(wsRoles.Rows.Count, 1).End(xlUp).Row
+    
+    outRow = 1
+    For i = 2 To lastRowData ' Fila 1 es header
+        Set rowData = wsData.Rows(i)
+        If lastRowRegion < 2 Then lastRowRegion = i ' fallback si no hay regionales
+        If lastRowRole < 2 Then lastRowRole = i ' fallback si no hay roles
+        For j = 2 To lastRowRegion
+            officeValue = Trim(wsRegion.Cells(j, 1).Value)
+            If officeValue = "" Then officeValue = Trim(wsData.Cells(i, 8).Value)
+            If Trim(wsRegion.Cells(j, 3).Value) <> "1" Then GoTo NextRegion ' Solo si Estado = 1
+            For k = 2 To lastRowRole
+                roleValue = Trim(wsRoles.Cells(k, 1).Value)
+                If roleValue = "" Then roleValue = Trim(wsData.Cells(i, 7).Value)
+                If Trim(wsRoles.Cells(k, 3).Value) <> "1" Then GoTo NextRole ' Solo si Estado = 1
+                values = ""
+                values = values & IIf(rowData.Cells(1, 1).Value = "", "NULL", "'" & rowData.Cells(1, 1).Value & "'") & ", " ' NBRANCH
+                values = values & IIf(rowData.Cells(1, 2).Value = "", "NULL", "'" & Replace(rowData.Cells(1, 2).Value, "'", "''") & "'") & ", " ' DESCRIPCION
+                values = values & IIf(rowData.Cells(1, 3).Value = "", "NULL", "'" & rowData.Cells(1, 3).Value & "'") & ", " ' NPRODUCT
+                If rowData.Cells(1, 4).Value = "" Then
+                    values = values & "NULL, "
+                Else
+                    values = values & "TO_DATE('" & Format(rowData.Cells(1, 4).Value, "DD-MM-YYYY") & "', 'DD-MM-YYYY'), "
+                End If
+                values = values & IIf(rowData.Cells(1, 5).Value = "", "NULL", "'" & rowData.Cells(1, 5).Value & "'") & ", " ' NMODULEC
+                values = values & IIf(rowData.Cells(1, 6).Value = "", "NULL", "'" & rowData.Cells(1, 6).Value & "'") & ", " ' NCOVER
+                values = values & IIf(roleValue = "", "NULL", "'" & roleValue & "'") & ", " ' NROLE
+                values = values & IIf(officeValue = "", "NULL", "'" & officeValue & "'") & ", " ' NOFFICE
+                values = values & IIf(rowData.Cells(1, 9).Value = "", "NULL", "'" & rowData.Cells(1, 9).Value & "'") & ", " ' NGEOGRAPHAREA
+                values = values & IIf(rowData.Cells(1, 10).Value = "", "NULL", "'" & rowData.Cells(1, 10).Value & "'") & ", " ' NATTENSYSTEM
+                If rowData.Cells(1, 11).Value = "" Then
+                    values = values & "0, "
+                Else
+                    values = values & "'" & rowData.Cells(1, 11).Value & "', "
+                End If
+                values = values & IIf(rowData.Cells(1, 12).Value = "", "NULL", "'" & rowData.Cells(1, 12).Value & "'") & ", " ' NCURRENCY
+                values = values & IIf(rowData.Cells(1, 13).Value = "", "NULL", "'" & rowData.Cells(1, 13).Value & "'") & ", " ' NAGE_INIT
+                values = values & IIf(rowData.Cells(1, 14).Value = "", "NULL", "'" & rowData.Cells(1, 14).Value & "'") & ", " ' NAGE_END
+                values = values & IIf(rowData.Cells(1, 15).Value = "", "NULL", "'" & rowData.Cells(1, 15).Value & "'") & ", " ' NAMOUNTM
+                values = values & IIf(rowData.Cells(1, 16).Value = "", "NULL", "'" & rowData.Cells(1, 16).Value & "'") & ", " ' NAMOUNTF
+                values = values & IIf(rowData.Cells(1, 17).Value = "", "NULL", "'" & rowData.Cells(1, 17).Value & "'") & ", " ' NPOLICY_YEAR_INIT
+                values = values & IIf(rowData.Cells(1, 18).Value = "", "NULL", "'" & rowData.Cells(1, 18).Value & "'") & ", " ' NPOLICY_YEAR_END
+                values = values & "'9999999', NULL, SYSDATE, '1'"
+                
+                insertSQL = "INSERT INTO TAR_HEALT_PREM (" & columns & ") VALUES (" & values & ");"
+                wsInsert.Cells(outRow, 1).Value = insertSQL
+                outRow = outRow + 1
+            Next k
+NextRole:
+        Next j
+NextRegion:
+    Next i
+    
+    MsgBox "INSERTs generados en la hoja 'INSERT' para todas las combinaciones de REGIONALES y ROLES."
+End Sub
