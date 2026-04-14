@@ -1,11 +1,21 @@
 -------------------------------------------------------------------------------------
 ---- PAGOS ORIGINALES Y ANTICIPADOS UNIFICADOS
 -------------------------------------------------------------------------------------
-WITH ctePago as (
+WITH cteMonedaPoliza AS(
+        SELECT 
+            cpol.SCERTYPE, cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY, cpol.NCURRENCY
+            ,ROW_NUMBER() OVER(PARTITION BY cpol.SCERTYPE, cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY ORDER BY DNULLDATE) as rn
+        FROM CURREN_POL cpol 
+        WHERE cpol.dnulldate IS NULL
+)
+,ctePago as (
      SELECT CF.nbordereaux,CM.Ncurrency
        ,T11.sdescript as MonedaTransaccion
        ,T78.sdescript as FormaCobroRealizado
        ,NVL(CM.NAMOUNT,0) As ImporteRecibido 
+       ,CM.NORI_CURR AS   CodMonedaOrigen
+       , CM.NORI_AMOUNT AS ImporteRecibidoMO
+       ,(CM.NORI_AMOUNT * CM.NEXCHANGE) as ImporteRecibidoLO
        , CASE WHEN CM.nmov_type = 2 THEN TO_CHAR(CM.sdocnumbe) ELSE '' END As NroCheque
        , CASE WHEN CM.nmov_type IN (2,27,57) THEN CM.ddoc_date                  
               ELSE NULL
@@ -25,17 +35,23 @@ WITH ctePago as (
         ,'' As CodigoTransaccion
     FROM COLFORMREF CF
     INNER JOIN CASH_MOV CM ON CF.nbordereaux= CM.nbordereaux
+    INNER JOIN cteMonedaPoliza MON ON CF.NBRANCH= MON.NBRANCH 
+                AND CF.NPRODUCT = MON.NPRODUCT AND CF.NPOLICY = MON.NPOLICY
+                AND MON.RN=1
     LEFT JOIN TABLE11 T11 On  CM.Ncurrency = T11.ncodigint
     LEFT JOIN TABLE7 T7 ON CM.nbank_code = T7.Nbank_code
     LEFT JOIN TABLE78 T78 ON CM.nmov_type= T78.nmov_type
-    WHERE CM.nbordereaux IS NOT NULL 
-
+    WHERE CM.nbordereaux IS NOT NULL  
+        
     UNION ALL
 
     SELECT CF2.nbordereaux,BM.Ncurrency
         ,T11.sdescript as MonedaTransaccion
         ,T296.sdescript as FormaCobroRealizado
-        ,NVL(BM.NCASH_AMOUN,0) As ImporteRecibido       
+        ,NVL(BM.NCASH_AMOUN,0) As ImporteRecibido 
+        ,BM.NORI_CURR AS   CodMonedaOrigen
+        , BM.NORI_AMOUNT AS ImporteRecibidoMO
+        ,(BM.NORI_AMOUNT * BM.NEXCHANGE) as ImporteRecibidoLO    
         ,'' As NroCheque
         , CASE WHEN BM.nbordereaux IS NOT NULL THEN BM.ddoc_date
                ELSE NULL
@@ -52,6 +68,7 @@ WITH ctePago as (
     LEFT JOIN TABLE7 T7 on BA.NBANK_CODE= T7.NBANK_CODE
     LEFT JOIN TABLE296 T296 ON BM.NTYPE_MOV= T296.NTYPE_MOV
     WHERE  BM.nbordereaux IS NOT NULL
+    
 ), cteRelacionCobro as(
    SELECT CF3.Nbordereaux 
             ,LISTAGG( TRIM(P.Nreceipt), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As Nreceipt  
@@ -185,23 +202,20 @@ SELECT
             , ctePago.AdministradoraTarjeta
             , ctePago.NroTarjeta
             , VPOL.MonedaPoliza
-            , cteRCob.ImporteCuota As ImportePrimaPorCobrarMO
-            , cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0) As ImportePrimaPorCobrarML
-            , ROUND(
-                  CASE WHEN Vpol.codMonedaPoliza = ctePago.Ncurrency
-                       THEN NVL(ctePago.ImporteRecibido,0)
-                       ELSE CASE WHEN  ctePago.Ncurrency = 1
-                                 THEN NVL(ctePago.ImporteRecibido,0) / NVL(tblTipoCambio.TC,0)
-                                 ELSE NVL(ctePago.ImporteRecibido,0) * NVL(tblTipoCambio.TC,0)
-                            END
-                  END,2) as ImporteRecibidoMO            
-            , ROUND(
-                  CASE WHEN ctePago.Ncurrency = 1
-                       THEN NVL(ctePago.ImporteRecibido,0)
-                       ELSE NVL(ctePago.ImporteRecibido,0) * NVL(tblTipoCambio.TC,0)
-                  END,2) as ImporteRecibidoML
-            , 0 As SaldoFavorMO
-            , 0 As SaldoFavorML
+            , ROUND(cteRCob.ImporteCuota,2) As ImportePrimaPorCobrarMO
+            , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As ImportePrimaPorCobrarML
+            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  ROUND(cteRCob.ImporteCuota,2)  
+                    ELSE ROUND(ctePago.ImporteRecibidoMO,2) END as ImporteRecibidoMO   
+            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2)  
+                    ELSE ROUND(ctePago.ImporteRecibidoLO,2) END as ImporteRecibidoML          
+            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCob.ImporteCuota,2)) 
+                    ELSE 0 END as SaldoFavorMO  
+            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCob.ImporteCuota,2)) * NVL(tblTipoCambio.TC,0)
+                    ELSE 0 END as SaldoFavorML 
             , 0 As RegularizacionSaldoMO
             , 0 As RegularizacionSaldoML
             , tblTipoCambio.TC as TipoCambio
@@ -281,20 +295,18 @@ UNION ALL
         , VPOL.MonedaPoliza
         , cteRCobF.ImporteCuota As ImportePrimaPorCobrarMO
         , cteRCobF.ImporteCuota  * NVL(tblTipoCambio.TC,0) As ImportePrimaPorCobrarML
-        , ROUND(CASE WHEN Vpol.codMonedaPoliza = ctePago.Ncurrency
-                   THEN NVL(ctePago.ImporteRecibido,0)
-                   ELSE CASE WHEN  ctePago.Ncurrency = 1
-                             THEN NVL(ctePago.ImporteRecibido,0) / NVL(tblTipoCambio.TC,0)
-                             ELSE NVL(ctePago.ImporteRecibido,0) * NVL(tblTipoCambio.TC,0)
-                        END
-              END,2) as ImporteRecibidoMO            
-        , ROUND(
-              CASE WHEN ctePago.Ncurrency = 1
-                   THEN NVL(ctePago.ImporteRecibido,0)
-                   ELSE NVL(ctePago.ImporteRecibido,0) * NVL(tblTipoCambio.TC,0)
-              END,2) as ImporteRecibidoML
-        , 0 As SaldoFavorMO
-        , 0 As SaldoFavorML
+        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
+                    THEN  ROUND(cteRCobF.ImporteCuota,2)  
+                    ELSE ROUND(ctePago.ImporteRecibidoMO,2) END as ImporteRecibidoMO   
+        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
+                THEN  ROUND(cteRCobF.ImporteCuota  * NVL(tblTipoCambio.TC,0),2)  
+                ELSE ROUND(ctePago.ImporteRecibidoLO,2) END as ImporteRecibidoML          
+        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
+                THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCobF.ImporteCuota,2)) 
+                ELSE 0 END as SaldoFavorMO  
+        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
+                THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCobF.ImporteCuota,2)) * NVL(tblTipoCambio.TC,0)
+                ELSE 0 END as SaldoFavorML 
         , 0 As RegularizacionSaldoMO
         , 0 As RegularizacionSaldoML
         , tblTipoCambio.TC as TipoCambio
@@ -530,4 +542,3 @@ UNION ALL
         ) tblTipoCambio
         WHERE VPOL.codFrecuenciaPago = 8
           AND pre.nstatus_pre in (8)
- 
