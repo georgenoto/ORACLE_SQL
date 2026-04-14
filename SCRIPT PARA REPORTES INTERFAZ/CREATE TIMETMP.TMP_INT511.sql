@@ -8,7 +8,7 @@ CREATE TABLE TIMETMP.TMP_INT511
   NPRODUCT                   NUMBER(10)				,    	--- COD. PRODUCTO
   NPOLICY                    NUMBER(10)				,    	--- NRO. POLIZA
   SDESPAYFREQ                VARCHAR2(50 CHAR)		, 		--- DESC. FRECUENCIA DE PAGO
-  NRECEIPT                   NUMBER(10),
+  NRECEIPT                   VARCHAR2(500 CHAR)     ,
   SDESCOMPANY                VARCHAR2(60 CHAR)		, 		--- NOMBRE COMPAÑIA
   SDESNITCOMPANY             VARCHAR2(30 CHAR)		, 		--- NIT COMPAÑIA
   SDESBRANCHT                VARCHAR2(30 CHAR)		, 		--- LINEA DE NEGOCIO
@@ -27,7 +27,7 @@ CREATE TABLE TIMETMP.TMP_INT511
   DCOLLECT                   DATE					,   	--- FECHA DE COBRO
   SCLIENT_BILL               VARCHAR2(100 CHAR)		, 		--- CLIENTE
   SDESTRATYPEI               VARCHAR2(100 CHAR)		,		--- DESC. TIPO DE CUOTA
-  NPERIOD           		 NUMBER(5)				,		--- NRO. CUOTA
+  NPERIOD           		 VARCHAR2(500 CHAR)		,		--- NRO. CUOTA
   DLIMITDATE 				 DATE					,		--- FECHA VENCIMIENTO
   SDECBILLNUM				 VARCHAR2(30 CHAR)		, 		--- DESC. TIPO DE DOCUMENTO
   NBILLNUM                   NUMBER(20)				,		--- NRO. FACTURA O RECIBO
