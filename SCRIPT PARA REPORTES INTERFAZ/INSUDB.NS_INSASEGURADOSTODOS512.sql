@@ -187,7 +187,8 @@ BEGIN
             --LEFT JOIN CLIENT cliMod On usrMod.SClient= cliMod.SClient  
                         
         WHERE    vPol.SCERTYPE =   '2'  
-        AND CERT.SSTATUSVA NOT IN (2,3,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
+        AND vpol.codestadopoliza NOT IN (2,3,6,7,8) -- SE QUITAN LAS POLIZAS QUE NO ESTAN ACTIVAS
+        AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
         --AND VPOL.NROPOLIZA in (1054,1016)
         --parametros>                              
         AND TO_CHAR(vpol.fechaemision , 'YYYYMMDD') BETWEEN  TO_CHAR(NS_INSASEGURADOSTODOS512.DINIDATE , 'YYYYMMDD')  AND TO_CHAR(NS_INSASEGURADOSTODOS512.DENDDATE, 'YYYYMMDD') 

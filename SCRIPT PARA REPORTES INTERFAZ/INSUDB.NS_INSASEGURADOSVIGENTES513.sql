@@ -405,6 +405,7 @@ INSERT INTO TIMETMP.TMP_INT513
                                                 AND aseg.sclient=excl.sclient                                             
     LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
     WHERE vPol.SCERTYPE = '2' 
+    AND vpol.codestadopoliza NOT IN (2,3,6,7,8) -- SE QUITAN LAS POLIZAS QUE NO ESTAN ACTIVAS
     AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
     --AND VPOL.NROPOLIZA in (1185)
     --parametros> 
