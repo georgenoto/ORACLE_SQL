@@ -1,4 +1,11 @@
 
+--############### LOG ERRORES POR PROCEDIMIENTO ALMACENADOS  ###############
+select * from TRACE where proc like '%TMP_INT51%'
+--############### TABLAS PARA REPORTES POR INTERFAZ  ###############
+SELECT * FROM MASTERSHEET Where Nsheet IN ('511','512','513','514','515')
+SELECT * FROM FIELDSHEET Where Nsheet IN ('511','512','513','514','515')
+SELECT * FROM WINDOWS WHERE SCODISPL IN ('INT511','INT512','INT513','INT514','INT515')
+
 --############### PROVEEDORES  ###############
 -- SSTATREGT --> ESTADOS DE PROVEEDORES
 SELECT * FROM TABLE26
