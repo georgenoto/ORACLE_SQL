@@ -1,6 +1,7 @@
 
 --############### LOG ERRORES POR PROCEDIMIENTO ALMACENADOS  ###############
 select * from TRACE where proc like '%TMP_INT51%'
+select * from T_ERR_INTERFACE order by dcompdate desc
 --############### TABLAS PARA REPORTES POR INTERFAZ  ###############
 SELECT * FROM MASTERSHEET Where Nsheet IN ('511','512','513','514','515')
 SELECT * FROM FIELDSHEET Where Nsheet IN ('511','512','513','514','515')
