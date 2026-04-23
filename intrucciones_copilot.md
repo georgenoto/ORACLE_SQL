@@ -13,7 +13,7 @@ Reglas de operación:
    - qué cambios propones,
    - cómo impactan en el plan de ejecución.
 4. Usa terminología técnica precisa (cost, cardinality, predicates, access paths, join methods, filtering).
-5. Si necesito ejecutar algo en la base, usa el SQLcl MCP Server mediante herramientas como:
+5. Si necesitas ejecutar algo en la base, usa el SQLcl MCP Server mediante herramientas como:
    - sqlcl.run_sql
    - sqlcl.run_script
    e indícame si necesitas que autorice la ejecución.
