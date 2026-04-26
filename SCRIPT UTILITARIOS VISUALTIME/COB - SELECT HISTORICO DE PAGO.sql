@@ -1,8 +1,14 @@
-SELECT * FROM PREMIUM WHERE NPOLICY=1398
-SELECT * FROM COLFORMREF WHERE STYPE=1
+SELECT * FROM PREMIUM WHERE NPOLICY=1505
+SELECT * FROM PREMIUM_MO WHERE NRECEIPT IN (12824,12827) ORDER BY NTRANSAC
+SELECT * FROM PREMIUM_MO WHERE NBORDEREAUX=5282 
+SELECT * FROM COLFORMREF WHERE NBORDEREAUX=5282
+SELECT * FROM BILLS WHERE nbordereaux=5282
+SELECT * FROM CASH_MOV WHERE NBORDEREAUX=5282
+SELECT * FROM BANK_MOV WHERE NBORDEREAUX=5282
 
 SELECT * FROM FINANC_DRA WHERE NCONTRAT=743 ORDER BY NDRAFT
-SELECT * FROM BILLS WHERE nbordereaux=5143
+SELECT * FROM BILLS WHERE nbordereaux=5282
+SELECT * FROM BILLS_HIS WHERE NBILLNUM
 
 ----// PREMIUM
 select p.nstatus_pre,t19.sdescript EstadoRecibo
@@ -30,10 +36,10 @@ PO.NTYPE
 FROM PREMIUM_MO PO
 INNER JOIN TABLE6 T6 ON PO.NTYPE = T6.NTYPE_TRAN
 WHERE
-po.nbordereaux=5143 
---PO.NRECEIPT IN (12824,12827)
+--po.nbordereaux=5130 
+PO.NRECEIPT IN (12824,12827)
 AND PO.NTYPE NOT IN (1)
-ORDER BY PO.NTRANSAC
+ORDER BY PO.NTRANSAC;
 
 --////// COLFORMREF     ////
 SELECT
@@ -47,12 +53,17 @@ FROM COLFORMREF CF
 INNER JOIN TABLE7502 T7502 ON CF.SREL_TYPE= T7502.SREL_TYPE
 WHERE 
 --CF.STYPE=3
-CF.NBORDEREAUX=5143;
+CF.NBORDEREAUX=5130;
 
 --//// TRELDOC      ////
 SELECT TD.*
 FROM TRELDOC TD
-WHERE TD.NBORDEREAUX=5282;
+WHERE TD.NBORDEREAUX=5130;
+--//// TRELDOC      ////
+
+SELECT B.* 
+FROM BILLS B
+WHERE B.NBORDEREAUX=5130
 
 ---////// SEGUIMIENTO MENSUAL, ANUAL        ////
 SELECT CF3.Nbordereaux 
@@ -62,6 +73,7 @@ SELECT CF3.Nbordereaux
                                      ELSE p.ntratypei END ORDER BY  p.deffecdate ) as NroCuota          
             ,P.dlimitdate AS VencimientoDeCuota
             ,ROUND(NVL(P.npremium,0),2) ImporteCuota
+            , fact.Nbillstat
             ,NVL(fact.NBILLNUM,0) As NroFactura
             ,NVL(fact.DISSUEDAT,NULL) As FechaFacturaAnterior
             ,NVL(fact.NPREVBILL,0) As NroFacturaAnterior
@@ -92,8 +104,7 @@ SELECT CF3.Nbordereaux
                              AND PO.NPAYNUMBE= P.NPAYNUMBE
         INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
         INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
-        LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux OR PO.nbillnum= fact.nbillnum
-                                AND fact.Nbillstat not in (2) -- Anulado
+        LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux OR PO.nbillnum= fact.nbillnum                               
         LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
         LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
         LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
@@ -110,9 +121,10 @@ SELECT CF3.Nbordereaux
     WHERE 
     PO.Ntype IN (2,13,14,21,39,40) --42 FACT. ANTICIPADA; 3= devolucion de prima --> Se quitan
     AND P.nstatus_pre in (2,5,6,7)
+    AND fact.Nbillstat not in (2) -- Anulado
     AND NVL(CF3.nnullcode,0)=0  
     AND CF3.STYPE NOT IN (2)
-    AND CF3.Nbordereaux=5143;
+    AND CF3.Nbordereaux=5130;
     
 -----/// SEGUIMIENTO FINANCIADA     ////
 SELECT CF2.Nbordereaux 
@@ -147,8 +159,7 @@ SELECT CF2.Nbordereaux
         INNER JOIN PREMIUM PRE ON FDRA.ncontrat = Pre.ncontrat
         INNER JOIN TABLE19 EstRec ON Pre.nstatus_pre= EstRec.nstatus_pre
         INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI                             
-        LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux 
-                                AND fact.Nbillstat not in (2) -- Anulado
+        LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux                                 
         LEFT JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
         LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
         LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
@@ -162,4 +173,5 @@ SELECT CF2.Nbordereaux
         )tblFA         
         WHERE PRE.nstatus_pre in (8)
         AND CF2.STYPE NOT IN (2)  --- SE QUITA EGRESO-DEVOLUCION DE PRIMA   
-        AND CF2.Nbordereaux =5143;
+        AND fact.Nbillstat not in (2) -- Anulado
+        AND CF2.Nbordereaux =5210;

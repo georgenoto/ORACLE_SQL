@@ -225,8 +225,8 @@ WITH cteMonedaPoliza AS(
            AND CF2.STYPE NOT IN (2)
 ), cteRelacionCobro as(
    SELECT CF3.Nbordereaux 
-            ,LISTAGG( DISTINCT TRIM(P.Nreceipt), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As Nreceipt  
-            ,LISTAGG( DISTINCT TRIM(P.NPeriod), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As NroCuota           
+            , LISTAGG( DISTINCT TRIM(P.Nreceipt), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As Nreceipt  
+            , LISTAGG( DISTINCT TRIM(P.NPeriod), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As NroCuota           
             , MAX(P.dlimitdate) AS VencimientoDeCuota
             , SUM(DISTINCT ROUND(NVL(P.npremium,0),2)) ImporteCuota
             , LISTAGG( DISTINCT TRIM(fact.NBILLNUM), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As NroFactura
@@ -247,9 +247,7 @@ WITH cteMonedaPoliza AS(
             , MAX(TRIM(MPag.sdescript))  As CanalCobroRealizado            
             , MAX(To_char(TRIM(P.NPeriod))) NPeriodo
             , MAX(P.Ntype) Ntype
-            , MAX(DECODE(NVL(fact.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento
-            
-            
+            , MAX(DECODE(NVL(fact.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento                        
        FROM COLFORMREF CF3
        INNER JOIN PREMIUM_MO PO ON CF3.Nbordereaux = PO.Nbordereaux
        INNER JOIN PREMIUM P  ON PO.SCERTYPE= P.SCERTYPE
@@ -260,8 +258,7 @@ WITH cteMonedaPoliza AS(
                              AND PO.NPAYNUMBE= P.NPAYNUMBE
         INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
         INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
-        LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux OR PO.nbillnum= fact.nbillnum
-                                AND fact.Nbillstat not in (2) -- Anulado
+        LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux OR PO.nbillnum= fact.nbillnum                                
         LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
         LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
         LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
@@ -278,6 +275,7 @@ WITH cteMonedaPoliza AS(
     WHERE 
     PO.Ntype IN (2,13,14,21,39,40) --42 FACT. ANTICIPADA; 3= devolucion de prima --> Se quitan
     AND P.nstatus_pre in (2,5,6,7)
+    AND fact.Nbillstat not in (2) -- Anulado
     AND NVL(CF3.nnullcode,0)=0  
     AND CF3.STYPE NOT IN (2)
     GROUP BY CF3.Nbordereaux
@@ -315,10 +313,8 @@ WITH cteMonedaPoliza AS(
                                          AND DRA_HIS.Ntype IN (2)
         INNER JOIN PREMIUM PRE ON FDRA.ncontrat = Pre.ncontrat
         INNER JOIN TABLE19 EstRec ON Pre.nstatus_pre= EstRec.nstatus_pre
-        INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI    
-                         
-        LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux 
-                                AND fact.Nbillstat not in (2) -- Anulado
+        INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI                             
+        LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux                                 
         LEFT JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
         LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
         LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
@@ -330,8 +326,9 @@ WITH cteMonedaPoliza AS(
                    AND FDRA.NDRAFT= DRA_HIS2.NDRAFT
                    AND DRA_HIS.Ntype IN (42)             
         )tblFA         
-        WHERE PRE.nstatus_pre in (8)
-        AND CF2.STYPE NOT IN (2)  --- SE QUITA EGRESO-DEVOLUCION DE PRIMA   
+        WHERE PRE.nstatus_pre in (8)        
+        AND CF2.STYPE NOT IN (2)  --- SE QUITA EGRESO-DEVOLUCION DE PRIMA  
+        AND fact.Nbillstat not in (2) -- Anulado 
         GROUP BY CF2.Nbordereaux 
 )
 SELECT 
