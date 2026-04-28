@@ -122,17 +122,15 @@ BEGIN
                               NAMOUNT_REAL
                               
                     )
--------------------------------------------------------------------------------------
----- PAGOS ORIGINALES Y ANTICIPADOS UNIFICADOS
--------------------------------------------------------------------------------------
 WITH cteMonedaPoliza AS(
         SELECT 
              cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY, cpol.NCURRENCY
             ,ROW_NUMBER() OVER(PARTITION BY  cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY ORDER BY DNULLDATE) as rn
         FROM CURREN_POL cpol 
         WHERE cpol.dnulldate IS NULL AND CPOL.SCERTYPE=2
-)
-,ctePago as (
+) 
+--- cteFormaPago, cte que busca las formas de pago por cada nbordereaux (por cada relacion de pago)
+,cteFormaPago as (
      SELECT CF.nbordereaux,CM.Ncurrency
        ,T11.sdescript as MonedaTransaccion
        ,T78.sdescript as FormaCobroRealizado
@@ -166,6 +164,7 @@ WITH cteMonedaPoliza AS(
         ,T7.sdescript As Banco
         ,'' as NroCuenta
         ,'' As CodigoTransaccion
+        
     FROM COLFORMREF CF
     INNER JOIN CASH_MOV CM ON CF.nbordereaux= CM.nbordereaux
     INNER JOIN cteMonedaPoliza MON ON CF.NBRANCH= MON.NBRANCH AND CF.NPRODUCT = MON.NPRODUCT
@@ -208,6 +207,7 @@ WITH cteMonedaPoliza AS(
         ,T7.sdescript As Banco
         ,CLEANSTRING(EXTENCRYPTION.DECRYPTDATA(BA.SACC_NUMBER)) as NroCuenta
         ,TO_CHAR(BM.sdep_number) As CodigoTransaccion
+        
     FROM COLFORMREF CF2
     INNER JOIN BANK_MOV BM On CF2.Nbordereaux=BM.Nbordereaux
     INNER JOIN cteMonedaPoliza MON ON CF2.NBRANCH= MON.NBRANCH AND CF2.NPRODUCT = MON.NPRODUCT
@@ -223,19 +223,59 @@ WITH cteMonedaPoliza AS(
         ) tblTipoCambio
     WHERE  BM.nbordereaux IS NOT NULL
            AND CF2.STYPE NOT IN (2)
-), cteRelacionCobro as(
+) 
+--cteFPagoIndividualCombinado, en esta tabla se coloca un contador, para poder verificar si tiene 1 o varias formas de pago
+,cteFPagoIndividualCombinado AS (
+    SELECT ctefc.NBordereaux
+    ,count(ctefc.nbordereaux) as rn
+    FROM cteFormaPago ctefc
+    group by ctefc.nbordereaux
+)
+---cteFacturasRecibos_EnRelacion, se agrupan los recibos y facturas que participan en la relacion
+,cteFacturasRecibos_EnRelacion as (
+   SELECT CF1.Nbordereaux
+        , LISTAGG(DISTINCT TO_CHAR(NVL(PO_AUX.Nreceipt,'')), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY PO_AUX.Nreceipt) As RecibosEnRelacion
+        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum,'')), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) As FacturasEnRelacion
+        , MAX(DECODE(NVL(F1.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento 
+        , MAX(NVL(tblCambioDeFactura.FechaCambioFact,NULL)) As FechaFacturaAnterior
+        , MAX(NVL(tblCambioDeFactura.NroFactAnterior,NULL)) As NroFacturaAnterior
+    FROM COLFORMREF CF1
+    INNER JOIN PREMIUM_MO PO_AUX  ON CF1.Nbordereaux = PO_AUX.Nbordereaux
+    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux
+    OUTER APPLY (
+         SELECT PO_AUX2.NBILLNUM 
+         FROM PREMIUM_MO  PO_AUX2 
+         WHERE PO_AUX2.nreceipt = PO_AUX.nreceipt 
+                AND PO_AUX2.NBILLNUM= PO_AUX.NBILLNUM 
+                AND PO_AUX2.NTYPE IN (42)                   
+                AND NVL(PO_AUX2.NNULLCODE,0)=0
+    )tblFA
+    OUTER APPLY (
+        SELECT B1.NBILLNUM As NroFactAnterior
+               ,B1.dcompdate as FechaCambioFact
+        FROM BILLS B1
+        WHERE B1.NBordereaux=CF1.Nbordereaux
+        AND B1.Nbillstat= 2 -- anulado
+        AND B1.Nnullcode= 11 -- Cambio de Factura
+    )tblCambioDeFactura
+    WHERE NVL(PO_AUX.NNULLCODE,0)=0 
+    AND F1.Nbillstat not in (2) -- Anulado 
+    GROUP BY CF1.Nbordereaux
+) 
+--cteDatosRecibo, busca a los recibos a los cuales afecta la relacion de pago.
+, cteDatosRecibo as(
    SELECT CF3.Nbordereaux 
-            , LISTAGG( DISTINCT TRIM(P.Nreceipt), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As Nreceipt  
-            , LISTAGG( DISTINCT TRIM(P.NPeriod), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As NroCuota           
-            , MAX(P.dlimitdate) AS VencimientoDeCuota
-            , SUM(DISTINCT ROUND(NVL(P.npremium,0),2)) ImporteCuota
-            , LISTAGG( DISTINCT TRIM(fact.NBILLNUM), ', ') WITHIN GROUP(ORDER BY P.NPolicy) As NroFactura
-            , MAX(NVL(fact.DISSUEDAT,NULL)) As FechaFacturaAnterior
-            , MAX(NVL(fact.NPREVBILL,0)) As NroFacturaAnterior
-            , MAX(UCash.NCASHNUM) As NCASHNUM
-            , MAX(INITCAP(LOWER(RTRIM(CliCaja.scliename)))) Cajero
-            , MAX(EstRec.sdescript) as EstadoRecibo
-            , MAX( CASE P.NTRATYPEI
+            , TRIM(P.Nreceipt) As Nreceipt  
+            , TRIM(P.NPeriod) As NroCuota           
+            , P.dlimitdate AS FechaVencimiento
+            , ROUND(NVL(P.npremium,0),2) ImporteCuota
+            , TRIM(cteRRel.FacturasEnRelacion) As NroFactura
+            , NVL(cteRRel.FechaFacturaAnterior,NULL) As FechaFacturaAnterior
+            , NVL(cteRRel.NroFacturaAnterior,0) As NroFacturaAnterior
+            , UCash.NCASHNUM As NCASHNUM
+            , INITCAP(LOWER(RTRIM(CliCaja.scliename))) as Cajero
+            , EstRec.sdescript as EstadoRecibo
+            , CASE P.NTRATYPEI
                    WHEN 1 THEN DECODE(P.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                    WHEN 2 THEN DECODE(P.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                    WHEN 3 THEN 'Anexo'
@@ -243,93 +283,132 @@ WITH cteMonedaPoliza AS(
                    WHEN 9 THEN DECODE(P.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
                    WHEN 12 THEN 'Anexo de rehabilitacion'
                    ELSE TRIM(TCuo.sdescript)
-              END) as TipoCuota
-            , MAX(TRIM(MPag.sdescript))  As CanalCobroRealizado            
-            , MAX(To_char(TRIM(P.NPeriod))) NPeriodo
-            , MAX(P.Ntype) Ntype
-            , MAX(DECODE(NVL(fact.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento                        
-       FROM COLFORMREF CF3
-       INNER JOIN PREMIUM_MO PO ON CF3.Nbordereaux = PO.Nbordereaux
-       INNER JOIN PREMIUM P  ON PO.SCERTYPE= P.SCERTYPE
-                             AND PO.NBRANCH= P.NBRANCH
-                             AND PO.NPRODUCT= P.NPRODUCT
-                             AND PO.NRECEIPT= P.NRECEIPT
-                             AND PO.NDIGIT= P.NDIGIT
-                             AND PO.NPAYNUMBE= P.NPAYNUMBE
-        INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
-        INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
-        LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux OR PO.nbillnum= fact.nbillnum                                
-        LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
-        LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
-        LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
-        LEFT JOIN TABLE5002 MPag ON P.nway_pay= MPag.nway_pay
-        LEFT JOIN TABLE6 Tipo ON PO.Ntype= tipo.ntype_tran
-        OUTER APPLY (
-             SELECT POAUX.NBILLNUM 
-             FROM PREMIUM_MO  POAUX 
-             WHERE POAUX.nreceipt = PO.nreceipt 
-                    AND POAUX.NBILLNUM= PO.NBILLNUM 
-                    AND POAUX.NTYPE IN (42)                   
-                    AND NVL(POAUX.NNULLCODE,0)=0
-        )tblFA
+              END as TipoCuota
+            , TRIM(MPag.sdescript)  As CanalCobroRealizado            
+            , To_char(TRIM(P.NPeriod)) NPeriodo
+            , P.Ntype Ntype
+            , TRIM(cteRRel.TipoDocumento) As TipoDocumento  
+            , TRIM(cteRRel.RecibosEnRelacion) as RecibosEnRelacion
+            , TRIM (cteRRel.FacturasEnRelacion) as   FacturasEnRelacion                   
+   FROM COLFORMREF CF3
+   INNER JOIN PREMIUM_MO PO ON CF3.Nbordereaux = PO.Nbordereaux
+   INNER JOIN PREMIUM P  ON PO.SCERTYPE= P.SCERTYPE
+                         AND PO.NBRANCH= P.NBRANCH
+                         AND PO.NPRODUCT= P.NPRODUCT
+                         AND PO.NRECEIPT= P.NRECEIPT
+                         AND PO.NDIGIT= P.NDIGIT
+                         AND PO.NPAYNUMBE= P.NPAYNUMBE
+    INNER JOIN cteFacturasRecibos_EnRelacion cteRRel on CF3.Nbordereaux = cteRRel.Nbordereaux
+    INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
+    INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
+    --LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux                             
+    LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
+    LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
+    LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
+    LEFT JOIN TABLE5002 MPag ON P.nway_pay= MPag.nway_pay
+    LEFT JOIN TABLE6 Tipo ON PO.Ntype= tipo.ntype_tran
+
     WHERE 
     PO.Ntype IN (2,13,14,21,39,40) --42 FACT. ANTICIPADA; 3= devolucion de prima --> Se quitan
-    AND P.nstatus_pre in (2,5,6,7)
-    AND fact.Nbillstat not in (2) -- Anulado
+    AND P.nstatus_pre in (2,5,6,7)    
     AND NVL(CF3.nnullcode,0)=0  
     AND CF3.STYPE NOT IN (2)
-    GROUP BY CF3.Nbordereaux
-), cteRelacionCobroFinanciada as(
-        SELECT CF2.Nbordereaux 
-            , LISTAGG(DISTINCT TRIM( PRE.Nreceipt), ', ') WITHIN GROUP(ORDER BY PRE.NPolicy) As Nreceipt  
-            , LISTAGG(DISTINCT TRIM(FDRA.Ndraft), ', ') WITHIN GROUP(ORDER BY PRE.NPolicy) As NroCuota           
-            , MAX(FDRA.dlimitdate) AS VencimientoDeCuota
-            , SUM(ROUND(FDRA.namount,2)) ImporteCuota
-            --, MAX(fact.NBILLNUM) As NroFactura
-             , LISTAGG( DISTINCT TRIM(fact.NBILLNUM), ', ') WITHIN GROUP(ORDER BY Pre.NPolicy) As NroFactura
-            , MAX(NVL(fact.DISSUEDAT,NULL)) As FechaFacturaAnterior
-            , MAX(NVL(fact.NPREVBILL,0)) As NroFacturaAnterior
-            , MAX(UCash.NCASHNUM) As NCASHNUM
-            , MAX(INITCAP(LOWER(RTRIM(CliCaja.scliename)))) Cajero
-            , MAX(EstRec.sdescript) as EstadoRecibo
-            , MAX( CASE PRE.NTRATYPEI
-                   WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
-                   WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
-                   WHEN 3 THEN 'Anexo'
-                   WHEN 4 THEN 'Anexo de resicion de contrato'
-                   WHEN 9 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
-                   WHEN 12 THEN 'Anexo de rehabilitacion'
-                   ELSE TRIM(TCuo.sdescript)
-              END) as TipoCuota            
-            , MAX(To_char(TRIM(PRE.NPeriod))) NPeriodo
-            , MAX(TRIM(MPag.sdescript))  As CanalCobroRealizado 
-            , MAX(PRE.Ntype) Ntype       
-            , MAX(DECODE(NVL(fact.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento
-                        
-        FROM  COLFORMREF CF2
-        INNER JOIN FINANC_DRA FDRA ON CF2.NBordereaux = FDRA.NBordereaux
-        INNER JOIN DRAFT_HIST DRA_HIS ON FDRA.ncontrat= DRA_HIS.ncontrat
-                                         AND FDRA.NDRAFT= DRA_HIS.NDRAFT
-                                         AND DRA_HIS.Ntype IN (2)
-        INNER JOIN PREMIUM PRE ON FDRA.ncontrat = Pre.ncontrat
-        INNER JOIN TABLE19 EstRec ON Pre.nstatus_pre= EstRec.nstatus_pre
-        INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI                             
-        LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux                                 
-        LEFT JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
-        LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
-        LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
-        LEFT JOIN TABLE5002 MPag ON PRE.nway_pay= MPag.nway_pay   
-        OUTER APPLY (
-             SELECT DRA_HIS2.NBILLNUM 
-             FROM DRAFT_HIST  DRA_HIS2 
-             WHERE FDRA.ncontrat= DRA_HIS2.ncontrat
-                   AND FDRA.NDRAFT= DRA_HIS2.NDRAFT
-                   AND DRA_HIS.Ntype IN (42)             
-        )tblFA         
-        WHERE PRE.nstatus_pre in (8)        
-        AND CF2.STYPE NOT IN (2)  --- SE QUITA EGRESO-DEVOLUCION DE PRIMA  
-        AND fact.Nbillstat not in (2) -- Anulado 
-        GROUP BY CF2.Nbordereaux 
+    
+   UNION ALL
+
+    SELECT CF2.Nbordereaux 
+        , TRIM(PRE.Nreceipt) As Nreceipt  
+        , TRIM(FDRA.Ndraft) As NroCuota           
+        , FDRA.dlimitdate AS FechaVencimiento
+        , ROUND(FDRA.namount,2) ImporteCuota
+        , TRIM(fact.NBILLNUM) As NroFactura
+        , NVL(fact.DISSUEDAT,NULL) As FechaFacturaAnterior
+        , NVL(fact.NPREVBILL,0) As NroFacturaAnterior
+        , UCash.NCASHNUM As NCASHNUM
+        , INITCAP(LOWER(RTRIM(CliCaja.scliename))) as Cajero
+        , EstRec.sdescript as EstadoRecibo
+        , CASE PRE.NTRATYPEI
+               WHEN 1 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
+               WHEN 2 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
+               WHEN 3 THEN 'Anexo'
+               WHEN 4 THEN 'Anexo de resicion de contrato'
+               WHEN 9 THEN DECODE(PRE.NSTATUS_PRE, 8, 'Cuota Financiamiento ', 'Cuota Regular ')
+               WHEN 12 THEN 'Anexo de rehabilitacion'
+               ELSE TRIM(TCuo.sdescript)
+          END as TipoCuota            
+        , To_char(TRIM(PRE.NPeriod)) NPeriodo
+        , TRIM(MPag.sdescript)  As CanalCobroRealizado 
+        , PRE.Ntype Ntype       
+        , DECODE(NVL(fact.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada')) As TipoDocumento
+        , TRIM(PRE.Nreceipt) as RecibosEnRelacion
+        , TRIM (fact.NBILLNUM) as   FacturasEnRelacion           
+    FROM  COLFORMREF CF2
+    INNER JOIN FINANC_DRA FDRA ON CF2.NBordereaux = FDRA.NBordereaux
+    INNER JOIN DRAFT_HIST DRA_HIS ON FDRA.ncontrat= DRA_HIS.ncontrat
+                                     AND FDRA.NDRAFT= DRA_HIS.NDRAFT
+                                     AND DRA_HIS.Ntype IN (2)
+    INNER JOIN PREMIUM PRE ON FDRA.ncontrat = Pre.ncontrat
+    INNER JOIN TABLE19 EstRec ON Pre.nstatus_pre= EstRec.nstatus_pre
+    INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI                             
+    LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux                                 
+    LEFT JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
+    LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
+    LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
+    LEFT JOIN TABLE5002 MPag ON PRE.nway_pay= MPag.nway_pay   
+    OUTER APPLY (
+         SELECT DRA_HIS2.NBILLNUM 
+         FROM DRAFT_HIST  DRA_HIS2 
+         WHERE FDRA.ncontrat= DRA_HIS2.ncontrat
+               AND FDRA.NDRAFT= DRA_HIS2.NDRAFT
+               AND DRA_HIS.Ntype IN (42)             
+    )tblFA         
+    WHERE PRE.nstatus_pre in (8)        
+    AND CF2.STYPE NOT IN (2)  --- SE QUITA EGRESO-DEVOLUCION DE PRIMA  
+    AND fact.Nbillstat not in (2) -- Anulado         
+) 
+--cteRCIndividualCombinado, en esta tabla se coloca un contador, para poder verificar si la relacion de pago afecta a 1 o varios recibos
+,cteRCIndividualCombinado AS (
+    SELECT cterc.NBordereaux
+    ,count(cterc.nbordereaux) as rn
+    FROM cteDatosRecibo cterc
+    group by cterc.nbordereaux
+)
+-- cteDatosReciboAgrupado, se agrupa si la relacion de pago afecta a varios recibos, caso contrario se muestra detalle del pago individual.
+, cteDatosReciboAgrupado AS(
+    SELECT cterc.NBordereaux, cterc.NReceipt, cterc.NroCuota,cterc.FechaVencimiento, cterc.ImporteCuota
+           ,cterc.NroFactura, cterc.FechaFacturaAnterior, cterc.NroFacturaAnterior, cterc.NCashnum, cterc.Cajero
+           ,cterc.EstadoRecibo, cterc.TipoCuota, cterc.CanalCobroRealizado, cterc.Nperiodo, cterc.Ntype
+           ,cterc.TipoDocumento
+           ,cterc.RecibosEnRelacion 
+           ,cterc.FacturasEnRelacion         
+    FROM cteDatosRecibo cterc
+    INNER JOIN cteRCIndividualCombinado cteaux on cterc.NBordereaux = cteaux.NBordereaux
+    WHERE cteaux.rn=1
+    
+    UNION ALL
+    
+    SELECT cterc.NBordereaux
+           , LISTAGG(DISTINCT TRIM(cterc.NReceipt), ', ') WITHIN GROUP(ORDER BY cterc.NReceipt) As Nreceipt 
+           , LISTAGG(DISTINCT TRIM(cterc.NroCuota), ', ') WITHIN GROUP(ORDER BY cterc.NroCuota) As NroCuota 
+           , MAX(cterc.FechaVencimiento) as FechaVencimiento
+           , SUM(cterc.ImporteCuota) as ImporteCuota
+           , LISTAGG(DISTINCT TRIM(cterc.NroFactura), ', ') WITHIN GROUP(ORDER BY cterc.NroFactura) As NroFactura
+           , MAX(cterc.FechaFacturaAnterior) As FechaFacturaAnterior
+           , MAX(cterc.NroFacturaAnterior) As NroFacturaAnterior
+           , MAX(cterc.NCashnum) As NCashnum
+           , MAX(cterc.Cajero) As Cajero
+           , MAX(cterc.EstadoRecibo) As EstadoRecibo
+           , MAX(cterc.TipoCuota) As TipoCuota
+           , MAX(cterc.CanalCobroRealizado) As CanalCobroRealizado
+           , MAX(cterc.Nperiodo) As Nperiodo
+           , MAX(cterc.Ntype) As Ntype
+           , MAX(cterc.TipoDocumento) As TipoDocumento
+           , MAX(cterc.RecibosEnRelacion) as RecibosEnRelacion 
+           , MAX(cterc.FacturasEnRelacion) as RecibosEnRelacion  
+    FROM cteDatosRecibo cterc
+    INNER JOIN cteRCIndividualCombinado cteaux on cterc.NBordereaux = cteaux.NBordereaux
+    WHERE cteaux.rn > 1
+    GROUP BY cterc.NBordereaux
 )
 SELECT 
               NS_INSCONTROLINGRESO511.SKEY
@@ -338,13 +417,13 @@ SELECT
             , VPOL.nproduct
             , TO_CHAR(VPOL.npolicy) AS NPOLICY
             , Vpol.FrecuenciaPago
-            , TO_CHAR(cteRCob.Nreceipt) AS NRECEIPT
+            , TO_CHAR(cteRCob.RecibosEnRelacion) AS NRECEIPT
             , 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
             , '145776027' AS NitEmpresa
             , VPOL.LineaNegocio
             , VPOL.CanalVenta
             , VPOL.Ramo
-            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto
+            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto as Producto
             , TRIM(VPOL.CanalCobroAsignado) AS CanalCobroAsignado
             , VPOL.CodRegionalPoliza
             , VPOL.RegionalPoliza
@@ -356,35 +435,35 @@ SELECT
             , CREF.DCollect AS FechaCobro
             , vpol.contratante Cliente
             , cteRCob.TipoCuota
-            , TO_CHAR(cteRCob.NroCuota) AS NROCUOTA
-            , cteRCob.VencimientoDeCuota
+            , TO_CHAR(cteRCob.NroCuota) AS NroCuota
+            , cteRCob.FechaVencimiento
             , cteRCob.TipoDocumento
-            , TO_CHAR(cteRCob.NroFactura)
-            , ctePago.FormaCobroRealizado 
+            , TO_CHAR(cteRCob.FacturasEnRelacion) As NroFactura
+            , cteFormaPago.FormaCobroRealizado 
             , TO_CHAR(CREF.NBordereaux) As NroRelacionCompensacion
             , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCob.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCob.NroCuota)) As Concepto
             , Vpol.FrecuenciaPago as Perioricidad
-            , ctePago.Banco 
-            , ctePago.NroCuenta
-            , ctePago.CodigoTransaccion
-            , ctePago.NroCheque
-            , ctePago.FechaDeposito
-            , ctePago.AdministradoraTarjeta
-            , ctePago.NroTarjeta
+            , cteFormaPago.Banco 
+            , cteFormaPago.NroCuenta
+            , cteFormaPago.CodigoTransaccion
+            , cteFormaPago.NroCheque
+            , cteFormaPago.FechaDeposito
+            , cteFormaPago.AdministradoraTarjeta
+            , cteFormaPago.NroTarjeta
             , VPOL.MonedaPoliza
             , ROUND(cteRCob.ImporteCuota,2) As ImportePrimaPorCobrarMO
             , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As ImportePrimaPorCobrarML
-            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+            , CASE WHEN  (ROUND(cteFormaPago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
                     THEN  ROUND(cteRCob.ImporteCuota,2)  
-                    ELSE ROUND(ctePago.ImporteRecibidoMO,2) END as ImporteRecibidoMO   
-            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    ELSE ROUND(cteFormaPago.ImporteRecibidoMO,2) END as ImporteRecibidoMO   
+            , CASE WHEN  (ROUND(cteFormaPago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
                     THEN  ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2)  
-                    ELSE ROUND(ctePago.ImporteRecibidoLO,2) END as ImporteRecibidoML          
-            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
-                    THEN  (ROUND(ctePago.ImporteRecibidoMO-cteRCob.ImporteCuota,2)) 
+                    ELSE ROUND(cteFormaPago.ImporteRecibidoLO,2) END as ImporteRecibidoML          
+            , CASE WHEN  (ROUND(cteFormaPago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  (ROUND(cteFormaPago.ImporteRecibidoMO-cteRCob.ImporteCuota,2)) 
                     ELSE 0 END as SaldoFavorMO  
-            , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
-                    THEN  (ROUND((ctePago.ImporteRecibidoMO - cteRCob.ImporteCuota) * NVL(tblTipoCambio.TC,0),2))
+            , CASE WHEN  (ROUND(cteFormaPago.ImporteRecibidoMO,2) > ROUND(cteRCob.ImporteCuota,2))
+                    THEN  (ROUND((cteFormaPago.ImporteRecibidoMO - cteRCob.ImporteCuota) * NVL(tblTipoCambio.TC,0),2))
                     ELSE 0 END as SaldoFavorML 
             , 0 As RegularizacionSaldoMO
             , 0 As RegularizacionSaldoML
@@ -394,8 +473,8 @@ SELECT
             , VPol.CodIntermediario
             , VPOL.Intermediario As Intermediario
             , cteRCob.Ntype
-            , ctePago.ncurrency as CodMonedaTransaccion
-            , ctePago.MonedaTransaccion
+            , cteFormaPago.ncurrency as CodMonedaTransaccion
+            , cteFormaPago.MonedaTransaccion
             , cteRCob.EstadoRecibo
             , CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.FechaFacturaAnterior ELSE NULL END As FechaFacturaRecibo
             , TO_CHAR(CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.NroFacturaAnterior ELSE NULL END) AS NroFacturaAnterior
@@ -403,10 +482,10 @@ SELECT
             , TO_CHAR(CREF.NCERTIF) As NroCertificado
             , VPOL.TipoFacturaColectivo
             , VPOL.TipoDistribucion
-            , ctePago.ImporteRecibido as ImporteTotalRecibido
+            , cteFormaPago.ImporteRecibido as ImporteTotalRecibido
         FROM COLFORMREF CREF              
-        INNER JOIN ctePago on CREF.NBordereaux = ctePago.NBordereaux
-        INNER JOIN cteRelacionCobro cteRCob ON CREF.NBordereaux = cteRCob.NBordereaux 
+        INNER JOIN cteFormaPago on CREF.NBordereaux = cteFormaPago.NBordereaux
+        INNER JOIN cteDatosReciboAgrupado cteRCob ON CREF.NBordereaux = cteRCob.NBordereaux 
         INNER JOIN NS_View_DatosGeneralesPoliza VPOL ON 
               CREF.NBRANCH= VPOL.NBRANCH
              AND CREF.NPRODUCT= VPOL.NPRODUCT
@@ -416,8 +495,7 @@ SELECT
             SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
             FROM dual
         ) tblTipoCambio
-        WHERE VPOL.codFrecuenciaPago <> 8
-           AND NVL(CREF.nnullcode,0)=0                 		             
+        WHERE NVL(CREF.nnullcode,0)=0                 		                                     		             
         --parametros>                  
         AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
         AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
@@ -428,114 +506,9 @@ SELECT
         AND NVL(VPol.CodIntermediario,0) = CASE WHEN NS_INSCONTROLINGRESO511.NINTERMED=0 
                                                  OR NS_INSCONTROLINGRESO511.NINTERMED IS NULL
                                             THEN NVL(VPol.CodIntermediario,0)  ELSE NS_INSCONTROLINGRESO511.NINTERMED END 			
-        AND NVL(cteRCob.NCASHNUM,0) = CASE WHEN  NVL(NS_INSCONTROLINGRESO511.NCASHNUM,0) = 0 THEN NVL(cteRCob.NCASHNUM,0) ELSE NS_INSCONTROLINGRESO511.NCASHNUM  END
-
-				
--------------------------------------------------------------------------------------
----- PAGOS FINANCIADOS
--------------------------------------------------------------------------------------   
-UNION ALL
-
-        SELECT
-          NS_INSCONTROLINGRESO511.SKEY
-        , VPOL.SCertype
-        , VPOL.nbranch
-        , VPOL.nproduct
-        , TO_CHAR(VPOL.npolicy) AS NPOLICY
-        , Vpol.FrecuenciaPago
-        , TO_CHAR(cteRCobF.Nreceipt) AS NRECEIPT
-        , 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
-        , '145776027' AS NitEmpresa
-        , VPOL.LineaNegocio
-        , VPOL.CanalVenta
-        , VPOL.Ramo
-        , VPOL.Producto
-        , TRIM(VPOL.CanalCobroAsignado) AS CanalCobroAsignado
-        , VPOL.CodRegionalPoliza
-        , VPOL.RegionalPoliza
-        , suc.noffice As CodRegionalTransaccion
-        , TRIM(suc.sdescript) as RegionalCobro
-        , cteRCobF.NCASHNUM CodCajero
-        , cteRCobF.Cajero
-        , cteRCobF.CanalCobroRealizado
-        , CREF.DCollect AS FechaCobro
-        , vpol.contratante Cliente
-        , cteRCobF.TipoCuota
-        , TO_CHAR(cteRCobF.NroCuota) AS NROCUOTA
-        , cteRCobF.VencimientoDeCuota
-        , cteRCobF.TipoDocumento
-        , TO_CHAR(cteRCobF.NroFactura) AS NROFACTURA
-        , ctePago.FormaCobroRealizado 
-        , TO_CHAR(cteRCobF.NBordereaux) As NroRelacionCompensacion        
-        , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCobF.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCobF.NroCuota)) As Concepto
-        , Vpol.FrecuenciaPago as Perioricidad
-        , ctePago.Banco 
-        , ctePago.NroCuenta
-        , ctePago.CodigoTransaccion
-        , ctePago.NroCheque
-        , ctePago.FechaDeposito
-        , ctePago.AdministradoraTarjeta
-        , ctePago.NroTarjeta
-        , VPOL.MonedaPoliza
-        , cteRCobF.ImporteCuota As ImportePrimaPorCobrarMO
-        , cteRCobF.ImporteCuota  * NVL(tblTipoCambio.TC,0) As ImportePrimaPorCobrarML
-        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
-                    THEN  ROUND(cteRCobF.ImporteCuota,2)  
-                    ELSE ROUND(ctePago.ImporteRecibidoMO,2) END as ImporteRecibidoMO   
-        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
-                THEN  ROUND(cteRCobF.ImporteCuota  * NVL(tblTipoCambio.TC,0),2)  
-                ELSE ROUND(ctePago.ImporteRecibidoLO,2) END as ImporteRecibidoML          
-        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
-                THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCobF.ImporteCuota,2)) 
-                ELSE 0 END as SaldoFavorMO  
-        , CASE WHEN  (ROUND(ctePago.ImporteRecibidoMO,2) > ROUND(cteRCobF.ImporteCuota,2))
-                THEN  (ROUND(ctePago.ImporteRecibidoMO,2) - ROUND(cteRCobF.ImporteCuota,2)) * NVL(tblTipoCambio.TC,0)
-                ELSE 0 END as SaldoFavorML 
-        , 0 As RegularizacionSaldoMO
-        , 0 As RegularizacionSaldoML
-        , tblTipoCambio.TC as TipoCambio
-        , VPol.CodTipoIntermediario
-        , VPOL.TipoIntermediario As TipoIntermediario
-        , VPol.CodIntermediario
-        , VPOL.Intermediario As Intermediario
-        , cteRCobF.Ntype
-        , ctePago.ncurrency as CodMonedaTransaccion
-        , ctePago.MonedaTransaccion
-        , cteRCobF.EstadoRecibo
-        , CASE WHEN NVL(cteRCobF.NroFacturaAnterior,0) <> 0 THEN cteRCobF.FechaFacturaAnterior ELSE NULL END As FechaFacturaRecibo
-        , TO_CHAR(CASE WHEN NVL(cteRCobF.NroFacturaAnterior,0) <> 0 THEN cteRCobF.NroFacturaAnterior ELSE NULL END) AS NroFacturaAnterior
-        , '' AS MonedaOriginalAnterior
-        , TO_CHAR(CREF.NCERTIF) As NroCertificado
-        , VPOL.TipoFacturaColectivo
-        , VPOL.TipoDistribucion
-         , ctePago.ImporteRecibido as ImporteTotalRecibido
-    FROM COLFORMREF CREF 
-    INNER JOIN ctePago on CREF.NBordereaux = ctePago.NBordereaux
-    INNER JOIN cteRelacionCobroFinanciada cteRCobF ON CREF.NBordereaux = cteRCobF.NBordereaux 
-    INNER JOIN NS_View_DatosGeneralesPoliza VPOL ON CREF.NBRANCH= VPOL.NBRANCH
-                                                     AND CREF.NPRODUCT= VPOL.NPRODUCT
-                                                     AND CREF.NPolicy= VPOL.NPolicy
-    INNER JOIN TABLE9 Suc ON CREF.noffice = suc.noffice                   
-    OUTER APPLY (
-        SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
-        FROM dual
-    ) tblTipoCambio
-    WHERE VPOL.codFrecuenciaPago = 8
-                          		
-    --   AND CREF.DCollect BETWEEN TO_DATE('01/02/2026', 'DD-MM-YYYY') AND TO_DATE('05/02/2026', 'DD-MM-YYYY')  
-    --parametros>                  
-        AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
-        AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
-        AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
-                                                        OR NS_INSCONTROLINGRESO511.NINTERTYP IS NULL
-                                                        OR NS_INSCONTROLINGRESO511.NINTERTYP = 999
-                                             THEN NVL(VPol.CodTipoIntermediario,0)ELSE NS_INSCONTROLINGRESO511.NINTERTYP END 
-        AND NVL(VPol.CodIntermediario,0) = CASE WHEN NS_INSCONTROLINGRESO511.NINTERMED=0 
-                                                 OR NS_INSCONTROLINGRESO511.NINTERMED IS NULL
-                                            THEN NVL(VPol.CodIntermediario,0)  ELSE NS_INSCONTROLINGRESO511.NINTERMED END 			
-        AND NVL(cteRCobF.NCASHNUM,0) = CASE WHEN  NVL(NS_INSCONTROLINGRESO511.NCASHNUM,0) = 0 THEN NVL(cteRCobF.NCASHNUM,0) ELSE NS_INSCONTROLINGRESO511.NCASHNUM  END	;
-    
-    COMMIT;
+        AND NVL(cteRCob.NCASHNUM,0) = CASE WHEN  NVL(NS_INSCONTROLINGRESO511.NCASHNUM,0) = 0 THEN NVL(cteRCob.NCASHNUM,0) ELSE NS_INSCONTROLINGRESO511.NCASHNUM  END;
+        			
+      COMMIT;
 
 EXCEPTION
     WHEN OTHERS THEN
