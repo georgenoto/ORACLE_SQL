@@ -122,7 +122,15 @@ BEGIN
                               NAMOUNT_REAL
                               
                     )
-WITH cteMonedaPoliza AS(
+WITH cteEmpresa AS (
+        SELECT NVL(TRIM(CD.SCLINUMDOCU), '1028483024') AS NIT_EMPRESA
+          ,TRIM(REAGENERALPKG.REANAMECLI(CD.SCLIENT)) AS NOMBRE_EMPRESA
+          , 1 Id
+        FROM COMPANY CM
+        INNER JOIN  CLIDOCUMENTS CD ON CM.SCLIENT = CD.SCLIENT
+        WHERE CM.NCOMPANY = REAGENERALPKG.REAOPT_SYSTEM_COMPANY
+) 
+,cteMonedaPoliza AS(
         SELECT 
              cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY, cpol.NCURRENCY
             ,ROW_NUMBER() OVER(PARTITION BY  cpol.NBRANCH,cpol.NPRODUCT, cpol.NPOLICY ORDER BY DNULLDATE) as rn
@@ -462,7 +470,6 @@ where NVL(cref.NNULLCODE,0)=0
     WHERE cteaux.cantFPago > 1 and  cteaux.cantRec > 1 
     GROUP BY cterc.NBordereaux,cteFormaPago.FormaCobroRealizado
 )
-
 SELECT 
               NS_INSCONTROLINGRESO511.SKEY SKEY
             , VPOL.SCertype
@@ -471,8 +478,8 @@ SELECT
             , TO_CHAR(VPOL.npolicy) AS NPOLICY
             , Vpol.FrecuenciaPago
             , TO_CHAR(cteRCob.RecibosEnRelacion) AS NRECEIPT
-            , 'Nacional Seguros Vida y Salud S.A' As NombreEmpresa
-            , '145776027' AS NitEmpresa
+            , cteEmpresa.NOMBRE_EMPRESA As NombreEmpresa
+            , TO_CHAR(cteEmpresa.NIT_EMPRESA) AS NitEmpresa
             , VPOL.LineaNegocio
             , VPOL.CanalVenta
             , VPOL.Ramo
@@ -539,6 +546,7 @@ SELECT
             SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
             FROM dual
         ) tblTipoCambio
+        INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0               		                                     		             
         --parametros>                  
         AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
