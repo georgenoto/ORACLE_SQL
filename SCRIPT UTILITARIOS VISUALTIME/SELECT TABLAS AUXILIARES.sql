@@ -1,4 +1,23 @@
-
+--############### SELECT TABLAS CON DATOS ###############
+SELECT owner, table_name, num_rows
+FROM dba_tables
+WHERE owner = 'INSUDB'       -- o el schema que necesites
+  AND num_rows > 0
+ORDER BY table_name;
+--############### SELECT BUSCAR COLUMNAS EN TABLAS ###############
+SELECT 
+    owner AS esquema,
+    table_name AS tabla, 
+    column_name AS columna, 
+    data_type AS tipo_dato
+FROM 
+    all_tab_cols
+WHERE 
+    owner = 'INSUDB'
+    AND column_name = 'NAMOUNT_VAT'
+ORDER BY 
+    owner, 
+    table_name;
 --############### LOG ERRORES POR PROCEDIMIENTO ALMACENADOS  ###############
 select * from TRACE where proc like '%TMP_INT51%'
 select * from T_ERR_INTERFACE order by dcompdate desc
@@ -24,3 +43,8 @@ SELECT * FROM TABLE17
 SELECT * FROM TABLE181
 -- TAB_MEDBENEFITS.SBENEFCATEG_CODE = TABLE8604.STYPECARE --> AMBULATORIA/HOSPITALARIA
 SELECT * FROM TABLE8604
+
+--############### PROCESOS BATCH  ###############
+select * from BATCH_JOB where skey= 'T2025110310060900442'
+select * from BATCH_PARAM WHERE NBATCH= 86 ---86	1	4	Fecha Proceso	PARAM4	1	20/02/2006 10:06:07
+select * from BATCH_PARAM_VALUE WHERE skey= 'T2025110310060900442' AND NSEQ=4
