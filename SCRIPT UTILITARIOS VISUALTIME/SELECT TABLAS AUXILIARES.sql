@@ -18,6 +18,8 @@ WHERE
 ORDER BY 
     owner, 
     table_name;
+--############### BUSCAR EN TODA LAS BASE DE DATOS ###############
+    select * from SYS.ALL_SOURCE where upper(TEXT) like '%ODONTOLOGIA%%' 
 --############### LOG ERRORES POR PROCEDIMIENTO ALMACENADOS  ###############
 select * from TRACE where proc like '%TMP_INT51%'
 select * from T_ERR_INTERFACE order by dcompdate desc
