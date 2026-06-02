@@ -175,6 +175,7 @@ WITH cteEmpresa AS (
         
     FROM COLFORMREF CF
     INNER JOIN CASH_MOV CM ON CF.nbordereaux= CM.nbordereaux
+                                AND CF.NCASHNUM = CM.NCASHNUM  --- para evitar los duplicados que provienen de Sintesis
     INNER JOIN cteMonedaPoliza MON ON CF.NBRANCH= MON.NBRANCH AND CF.NPRODUCT = MON.NPRODUCT
                                          AND CF.NPOLICY = MON.NPOLICY
                                          AND MON.RN=1
@@ -218,6 +219,7 @@ WITH cteEmpresa AS (
         
     FROM COLFORMREF CF2
     INNER JOIN BANK_MOV BM On CF2.Nbordereaux=BM.Nbordereaux
+                                AND CF2.NCASHNUM = BM.NCASHNUM --- para evitar los duplicados que provienen de Sintesis
     INNER JOIN cteMonedaPoliza MON ON CF2.NBRANCH= MON.NBRANCH AND CF2.NPRODUCT = MON.NPRODUCT
                                         AND CF2.NPOLICY = MON.NPOLICY
                                         AND MON.RN=1

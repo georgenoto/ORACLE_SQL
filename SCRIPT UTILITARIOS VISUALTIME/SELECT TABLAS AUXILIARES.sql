@@ -2,6 +2,7 @@
 SELECT owner, table_name, num_rows
 FROM dba_tables
 WHERE owner = 'INSUDB'       -- o el schema que necesites
+  and table_name like '%BATCH%'
   AND num_rows > 0
 ORDER BY table_name;
 --############### SELECT BUSCAR COLUMNAS EN TABLAS ###############

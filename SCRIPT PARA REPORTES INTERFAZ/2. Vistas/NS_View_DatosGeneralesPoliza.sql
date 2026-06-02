@@ -21,6 +21,17 @@ TasaCambioDolar AS (
         EXCHANGE e ON e.NCURRENCY = 2 -- Moneda dólar.
                    AND e.DEFFECDATE <= p.DISSUEDAT -- La fecha de la tasa debe ser anterior o igual a la de emisión.
                    AND (e.DNULLDATE IS NULL OR e.DNULLDATE > p.DISSUEDAT) -- La tasa debe estar vigente.
+),
+cteIntermediario AS(
+ SELECT COM.NPOLICY, COM.NBRANCH, COM.NPRODUCT 
+ , COM.NINTERMED COD_INTERMEDIARIO , INITCAP(LOWER(TRIM(CLI.SCLIENAME))) NOMBRE 
+ ,  TIPO.NINTERTYP AS COD_TIPOINTERMEDIARIO, INITCAP(LOWER(TRIM(TIPO.SDESCRIPT))) TIPO_INTERMEDIARIO 
+ , ROW_NUMBER() OVER(PARTITION BY  COM.NBRANCH, COM.NPRODUCT, COM.NPOLICY, COM.NINTERTYP ORDER BY COM.DEFFECDATE DESC) as rn
+ FROM COMMISSION COM
+ INNER JOIN INTERMEDIA INT ON COM.NINTERMED= INT.NINTERMED
+ INNER JOIN CLIENT CLI ON INT.SCLIENT= CLI.SCLIENT
+ INNER JOIN INTERM_TYP TIPO ON COM.NINTERTYP= TIPO.NINTERTYP
+ WHERE COM.SCERTYPE=2 AND COM.DNULLDATE IS NULL
 )
 SELECT
       TRIM(tcer.sdescript) AS TipoCertificado
@@ -57,10 +68,12 @@ SELECT
     , TRIM(CanCobro.sDescript) AS CanalCobroAsignado
     , FPag.npayfreq AS CodFrecuenciaPago
     , TRIM(FPag.sDescript) AS FrecuenciaPago
-    , TInte.NINTERTYP AS CodTipoIntermediario
-    , TRIM(TInte.sDescript) AS TipoIntermediario
-    , Inte.NINTERMED AS CodIntermediario
-    , INITCAP(LOWER(RTRIM(CliInte.sCliename))) AS Intermediario
+    , CTE_INTE.COD_TIPOINTERMEDIARIO AS CodTipoIntermediario
+    , CTE_INTE.TIPO_INTERMEDIARIO AS TipoIntermediario
+    , CTE_INTE.COD_INTERMEDIARIO AS CodIntermediario
+    , CTE_INTE.NOMBRE AS Intermediario
+    , CTE_SUP.COD_INTERMEDIARIO AS codSupervisor
+    , CTE_SUP.NOMBRE AS Supervisor
     , cert.Nbill_day AS DiadeCobro
     , TPol.sdescript AS TipoPoliza
     , TRIM(Prod.sshort_des) AS ProductoAbreviado
@@ -91,12 +104,12 @@ FROM
     -- Se usa LEFT JOIN para no descartar pólizas en moneda local (que no tendrán tasa en dólar).
     LEFT JOIN TasaCambioDolar Tasa ON pol.SCERTYPE = Tasa.SCERTYPE AND pol.NBRANCH = Tasa.NBRANCH AND pol.NPRODUCT = Tasa.NPRODUCT AND pol.NPOLICY = Tasa.NPOLICY AND Tasa.rn = 1
 
-    LEFT JOIN INTERMEDIA Inte ON pol.NINTERMED = Inte.NINTERMED
-    LEFT JOIN Client CliInte ON Inte.sClient = CliInte.sClient
-    LEFT JOIN INTERM_TYP TInte ON Inte.NINTERTYP = TInte.NINTERTYP
+    LEFT JOIN cteIntermediario CTE_INTE ON POL.NBRANCH=  CTE_INTE.NBRANCH AND POL.NPRODUCT = CTE_INTE.NPRODUCT AND POL.NPOLICY= CTE_INTE.NPOLICY AND CTE_INTE.COD_TIPOINTERMEDIARIO NOT IN (5) AND CTE_INTE.RN=1
+    LEFT JOIN cteIntermediario CTE_SUP ON POL.NBRANCH=  CTE_SUP.NBRANCH AND POL.NPRODUCT = CTE_SUP.NPRODUCT AND POL.NPOLICY= CTE_SUP.NPOLICY AND CTE_SUP.COD_TIPOINTERMEDIARIO  IN (5) AND CTE_SUP.RN=1
+     
 
 WHERE
     pol.SCERTYPE = '2'
+    --AND pol.npolicy = 75
     and pol.SSTATUS_POL NOT IN (2,3,7,8);
     -- SSTATUS_POL 6 = TERMINADA / ANULADA NO INGRESA PUESTO QUE LA VISTA MUESTRA TODAS LAS POLIZAS QUE SE EMITIERON, SIN IMPORTAR ESTADO ACTUAL
-    -- AND pol.npolicy = 28; 
