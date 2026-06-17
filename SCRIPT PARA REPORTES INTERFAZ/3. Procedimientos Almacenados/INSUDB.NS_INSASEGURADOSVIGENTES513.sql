@@ -121,39 +121,56 @@ INSERT INTO TIMETMP.TMP_INT513
             COB.nbranch,
             COB.nproduct,
             COB.ncertif,
-            COB.sclient,           
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92250) THEN ('SI' || ' - HASTA ' || COB.NCAPITAL) ELSE 'NO' END) AS TieneMaternidad,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) AND BENEF.NBENEFCATEG = 11 AND BENEF.SBENEFCATEG_CODE = 'TA0001' THEN NVL(BENEF.npercen_hospital,0) ELSE 0 END) AS porcentajehospitalario,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) AND BENEF.NBENEFCATEG = 11 AND BENEF.SBENEFCATEG_CODE = 'TA0002' THEN NVL(BENEF.npercen_Ambulatory,0) ELSE 0 END) AS porcentajeambulatorio,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) AND BENEF.NBENEFCATEG = 5 AND BENEF.SBENEFCATEG_CODE = '2310101' THEN NVL(BENEF.npercen_Ambulatory,0) ELSE 0 END) AS PorcAmbulatorioMedicamentos,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN 'SI' ELSE 'NO' END) AS TieneOdontologia,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN BENEF.NAMOUNT_COPAY ELSE NULL END) AS coaseguroodontologico,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN CLI.SCLIENAME ELSE NULL END) AS clinicaodontologica,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92200) THEN 'SI' ELSE 'NO' END) AS SeguroAlViajero,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92180) THEN CLI.SCLIENAME ELSE 'NO' END) AS EmergenciaMedicas,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92220) THEN 'SI' ELSE 'NO' END) AS MuerteAccidental,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92230) THEN 'SI' ELSE 'NO' END) AS Sepelio,
-            MAX(NVL(BENEF.NDED_TYPE,0)) AS NDEDUCIBLE,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) THEN COB.NCAPITAL ELSE 0 END) AS CapitalAsegurado,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) THEN COB.DANTIDATE ELSE NULL END) AS FechaAntiguedad,
-            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92000) THEN COB.NANTI_AMOUNT ELSE NULL END) AS CapitalAntiguedad
+            COB.sclient,  
+            -- Solución alfabética: Si existe el caso, se concatena. Si no, devuelve 'NO'
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92250 THEN ('SI - HASTA ' || COB.NCAPITAL) END), 'NO') AS TieneMaternidad,
+            
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 AND BENEF.NBENEFCATEG = 11 AND BENEF.SBENEFCATEG_CODE = 'TA0001' THEN NVL(BENEF.npercen_hospital, 0) ELSE 0 END) AS porcentajehospitalario,
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 AND BENEF.NBENEFCATEG = 11 AND BENEF.SBENEFCATEG_CODE = 'TA0002' THEN NVL(BENEF.npercen_Ambulatory, 0) ELSE 0 END) AS porcentajeambulatorio,
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 AND BENEF.NBENEFCATEG = 5 AND BENEF.SBENEFCATEG_CODE = '2310101' THEN NVL(BENEF.npercen_Ambulatory, 0) ELSE 0 END) AS PorcAmbulatorioMedicamentos,
+            
+            -- Se usa NVL fuera del MAX para evitar que 'NO' le gane a 'SI'
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN 'SI' END), 'NO') AS TieneOdontologia,
+            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN BENEF.NAMOUNT_COPAY END) AS coaseguroodontologico,
+            MAX(CASE WHEN TLCOB.NCOVERGEN IN (92190, 92191) THEN CLI.SCLIENAME END) AS clinicaodontologica,
+            
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92200 THEN 'SI' END), 'NO') AS SeguroAlViajero,
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92180 THEN CLI.SCLIENAME END), 'NO') AS EmergenciaMedicas,
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92220 THEN 'SI' END), 'NO') AS MuerteAccidental,
+            NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92230 THEN 'SI' END), 'NO') AS Sepelio,
+            
+            MAX(NVL(BENEF.NDED_TYPE, '0')) AS NDEDUCIBLE,
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.NCAPITAL ELSE 0 END) AS CapitalAsegurado,
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.DANTIDATE END) AS FechaAntiguedad,
+            MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.NANTI_AMOUNT END) AS CapitalAntiguedad
         FROM COVER COB
-        INNER JOIN LIFE_COVER LCOB ON COB.NBRANCH = LCOB.NBRANCH AND COB.NPRODUCT = LCOB.NPRODUCT 
-                                        AND COB.NCOVER = LCOB.NCOVER AND COB.NMODULEC = LCOB.NMODULEC 
+        INNER JOIN LIFE_COVER LCOB     ON COB.NBRANCH = LCOB.NBRANCH 
+                                        AND COB.NPRODUCT = LCOB.NPRODUCT 
+                                        AND COB.NCOVER = LCOB.NCOVER 
+                                        AND COB.NMODULEC = LCOB.NMODULEC 
                                         AND LCOB.DNULLDATE IS NULL
-        INNER JOIN TAB_LIFCOV TLCOB ON LCOB.NCOVERGEN = TLCOB.NCOVERGEN
-        LEFT JOIN TAB_MEDBENEFITS BENEF  ON COB.NBRANCH = BENEF.NBRANCH AND COB.NPRODUCT = BENEF.NPRODUCT 
-                                        AND COB.NPOLICY = BENEF.NPOLICY AND COB.NCERTIF = BENEF.NCERTIF
-                                        AND COB.NMODULEC = BENEF.NMODULEC AND COB.NCOVER = BENEF.NCOVER AND COB.SCLIENT = BENEF.SCLIENT AND BENEF.DNULLDATE IS NULL
-        LEFT JOIN LEND_AGREE_PRES LAGRE
-                                        ON COB.scertype = LAGRE.scertype AND COB.nbranch = LAGRE.nbranch AND COB.nproduct = LAGRE.nproduct AND COB.npolicy = LAGRE.npolicy
-                                        AND COB.nmodulec = LAGRE.nmodulec AND COB.sclient = LAGRE.sclient AND COB.ngroup_insu = LAGRE.ngroup AND COB.NCOVER = LAGRE.NCOVER
-                                        AND LAGRE.dnulldate IS NULL
-        LEFT JOIN AGREEMENT AGRE ON LAGRE.ncod_agree = AGRE.ncod_agree
-        LEFT JOIN CLIENT CLI ON AGRE.sclient = CLI.sclient
-        WHERE COB.dnulldate IS NULL
-          AND COB.scertype=2
-          AND TLCOB.NCOVERGEN IN (92250, 92000, 92190, 92191, 92200, 92180, 92220, 92230)
+        INNER JOIN TAB_LIFCOV TLCOB    ON LCOB.NCOVERGEN = TLCOB.NCOVERGEN
+        LEFT JOIN TAB_MEDBENEFITS BENEF  ON COB.NBRANCH = BENEF.NBRANCH 
+                                            AND COB.NPRODUCT = BENEF.NPRODUCT 
+                                            AND COB.NPOLICY = BENEF.NPOLICY 
+                                            AND COB.NCERTIF = BENEF.NCERTIF
+                                            --AND COB.NMODULEC = BENEF.NMODULEC 
+                                            AND COB.NCOVER = BENEF.NCOVER 
+                                            AND COB.SCLIENT = BENEF.SCLIENT 
+                                            AND BENEF.DNULLDATE IS NULL
+        LEFT JOIN LEND_AGREE_PRES LAGRE     ON COB.NBRANCH = LAGRE.NBRANCH 
+                                            AND COB.NPRODUCT = LAGRE.NPRODUCT 
+                                            AND COB.NPOLICY = LAGRE.NPOLICY
+                                            --AND COB.NMODULEC = LAGRE.NMODULEC 
+                                            AND COB.SCLIENT = LAGRE.SCLIENT  
+                                            AND COB.NCOVER = LAGRE.NCOVER
+                                            AND LAGRE.DNULLDATE IS NULL
+        LEFT JOIN AGREEMENT AGRE     ON LAGRE.NCOD_AGREE = AGRE.NCOD_AGREE
+        LEFT JOIN CLIENT CLI     ON AGRE.SCLIENT = CLI.SCLIENT
+        WHERE COB.DNULLDATE IS NULL
+        AND COB.SCERTYPE = 2
+        AND TLCOB.NCOVERGEN IN (92000, 92180, 92190, 92191, 92200, 92220, 92230, 92250)
+        --AND COB.NPOLICY = 30
         GROUP BY
             COB.npolicy,
             COB.scertype,

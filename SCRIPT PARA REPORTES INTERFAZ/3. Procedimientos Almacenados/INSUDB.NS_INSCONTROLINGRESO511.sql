@@ -273,6 +273,7 @@ WITH cteEmpresa AS (
         ) tblTipoCambio
     WHERE CM.nbordereaux IS NOT NULL  
           AND CF.STYPE NOT IN (2)
+          AND CM.NTYPE_MOVE=17
 
     ---// PAGOS ADICIONALES // -----       
     UNION ALL 
@@ -323,8 +324,7 @@ WITH cteEmpresa AS (
             FROM dual
         ) tblTipoCambio
     WHERE CM.nbordereaux IS NOT NULL  
-          AND CF.STYPE NOT IN (2)
-           AND CM.nbordereaux= 159
+          AND CF.STYPE NOT IN (2)          
     UNION ALL
 
     SELECT CF2.nbordereaux,BM.Ncurrency
@@ -368,7 +368,7 @@ WITH cteEmpresa AS (
         ) tblTipoCambio
     WHERE  BM.nbordereaux IS NOT NULL
            AND CF2.STYPE NOT IN (2)
-           AND BM.nbordereaux= 159
+           
 ) 
 ---cteFacturas_EnRelacion, se agrupan las facturas que participan en la relacion
 ,cteFacturas_EnRelacion as (
@@ -708,7 +708,7 @@ SELECT
             , cteRCob.NCASHNUM CodCajero
             , cteRCob.Cajero
             , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DCollect AS FechaCobro
+            , CREF.DVALUEDATE AS FechaCobro
             , vpol.contratante Cliente
             , cteRCob.TipoCuota
             , TO_CHAR(cteRCob.NroCuota) AS NroCuota
@@ -759,13 +759,13 @@ SELECT
              AND CREF.NPolicy= VPOL.NPolicy
         INNER JOIN TABLE9 Suc ON CREF.noffice = suc.noffice
         OUTER APPLY (
-            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
+            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DVALUEDATE) AS TC
             FROM dual
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0               		                                     		             
         --parametros>                  
-        AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
+        AND  CREF.DVALUEDATE BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
         AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
         AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
                                                         OR NS_INSCONTROLINGRESO511.NINTERTYP IS NULL
@@ -801,7 +801,7 @@ SELECT
             , cteRCob.NCASHNUM CodCajero
             , cteRCob.Cajero
             , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DCollect AS FechaCobro
+            , CREF.DVALUEDATE AS FechaCobro
             , vpol.contratante Cliente
             , cteRCob.TipoCuota
             , TO_CHAR(cteRCob.NroCuota) AS NroCuota
@@ -850,13 +850,13 @@ SELECT
         INNER JOIN NS_View_DatosGeneralesPoliza VPOL ON  RCon.NPolicy= VPOL.NPolicy
         INNER JOIN TABLE9 Suc ON CREF.noffice = suc.noffice
         OUTER APPLY (
-            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
+            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DVALUEDATE) AS TC
             FROM dual
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0    
         --parametros>                  
-        AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
+        AND  CREF.DVALUEDATE BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
         AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
         AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
                                                         OR NS_INSCONTROLINGRESO511.NINTERTYP IS NULL
