@@ -175,7 +175,7 @@ WITH cteEmpresa AS (
         
     FROM COLFORMREF CF
     INNER JOIN CASH_MOV CM ON CF.nbordereaux= CM.nbordereaux
-                                AND CF.NCASHNUM = CM.NCASHNUM  --- para evitar los duplicados que provienen de Sintesis
+                                --AND CF.NCASHNUM = CM.NCASHNUM  --- para evitar los duplicados que provienen de Sintesis
     INNER JOIN cteMonedaPoliza MON ON CF.NBRANCH= MON.NBRANCH AND CF.NPRODUCT = MON.NPRODUCT
                                          AND CF.NPOLICY = MON.NPOLICY
                                          AND MON.RN=1
@@ -219,7 +219,7 @@ WITH cteEmpresa AS (
         
     FROM COLFORMREF CF2
     INNER JOIN BANK_MOV BM On CF2.Nbordereaux=BM.Nbordereaux
-                                AND CF2.NCASHNUM = BM.NCASHNUM --- para evitar los duplicados que provienen de Sintesis
+                                --AND CF2.NCASHNUM = BM.NCASHNUM --- para evitar los duplicados que provienen de Sintesis
     INNER JOIN cteMonedaPoliza MON ON CF2.NBRANCH= MON.NBRANCH AND CF2.NPRODUCT = MON.NPRODUCT
                                         AND CF2.NPOLICY = MON.NPOLICY
                                         AND MON.RN=1
@@ -373,13 +373,13 @@ WITH cteEmpresa AS (
 ---cteFacturas_EnRelacion, se agrupan las facturas que participan en la relacion
 ,cteFacturas_EnRelacion as (
    SELECT CF1.Nbordereaux
-        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum,'')), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) As FacturasEnRelacion
+        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum,PO_AUX.nreceipt)), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) As FacturasEnRelacion
         , MAX(DECODE(NVL(F1.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento 
         , MAX(NVL(tblCambioDeFactura.FechaCambioFact,NULL)) As FechaFacturaAnterior
         , MAX(NVL(tblCambioDeFactura.NroFactAnterior,NULL)) As NroFacturaAnterior
     FROM COLFORMREF CF1
     INNER JOIN PREMIUM_MO PO_AUX  ON CF1.Nbordereaux = PO_AUX.Nbordereaux
-    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux
+    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux AND F1.Nbillstat not in (2)
     OUTER APPLY (
          SELECT PO_AUX2.NBILLNUM 
          FROM PREMIUM_MO  PO_AUX2 
@@ -397,7 +397,8 @@ WITH cteEmpresa AS (
         AND B1.Nnullcode= 11 -- Cambio de Factura
     )tblCambioDeFactura
     WHERE NVL(PO_AUX.NNULLCODE,0)=0 
-    AND F1.Nbillstat not in (2) -- Anulado 
+    --AND F1.Nbillstat not in (2) -- Anulado 
+    --and CF1.Nbordereaux=226
     GROUP BY CF1.Nbordereaux
     
     UNION ALL
@@ -460,13 +461,13 @@ WITH cteEmpresa AS (
                          AND PO.NDIGIT= P.NDIGIT
                          AND PO.NPAYNUMBE= P.NPAYNUMBE
     INNER JOIN cteRecibos_EnRelacion cteRRel on CF3.Nbordereaux = cteRRel.Nbordereaux
-    INNER JOIN cteFacturas_EnRelacion cteFRel on CF3.Nbordereaux = cteFRel.Nbordereaux
+    LEFT JOIN cteFacturas_EnRelacion cteFRel on CF3.Nbordereaux = cteFRel.Nbordereaux
     INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
     INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
     --LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux                             
-    LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
-    LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
-    LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
+    INNER JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
+    INNER JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
+    INNER JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
     LEFT JOIN TABLE5002 MPag ON P.nway_pay= MPag.nway_pay
     LEFT JOIN TABLE6 Tipo ON PO.Ntype= tipo.ntype_tran
 
@@ -513,9 +514,9 @@ WITH cteEmpresa AS (
     INNER JOIN TABLE19 EstRec ON Pre.nstatus_pre= EstRec.nstatus_pre
     INNER JOIN TABLE24 TCuo ON Pre.NTRATYPEI= TCuo.NTRATYPEI                             
     LEFT JOIN BILLS fact ON FDRA.NBordereaux = fact.NBordereaux                                 
-    LEFT JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
-    LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
-    LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
+    INNER JOIN USER_CASHNUM UCash ON CF2.NCASHNUM= UCash.NCASHNUM
+    INNER JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
+    INNER JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient
     LEFT JOIN TABLE5002 MPag ON PRE.nway_pay= MPag.nway_pay   
     OUTER APPLY (
          SELECT DRA_HIS2.NBILLNUM 
@@ -556,9 +557,9 @@ WITH cteEmpresa AS (
     --INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
     INNER JOIN TABLE22 TCuo ON RCON.NCONCEPT= TCuo.NCONCEPT                     
     INNER JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux                             
-    LEFT JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
-    LEFT JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
-    LEFT JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
+    INNER JOIN USER_CASHNUM UCash ON CF3.NCASHNUM= UCash.NCASHNUM
+    INNER JOIN USERS UsrCaja ON UCash.NUSER= UsrCaja.NUSERCODE
+    INNER JOIN CLIENT CliCaja On UsrCaja.SClient= CliCaja.SClient        
     LEFT JOIN TABLE5554 CPag ON CF3.NINPUTTYP= CPag.NINPUTTYP
    WHERE 
     NVL(CF3.nnullcode,0)=0  
@@ -708,7 +709,7 @@ SELECT
             , cteRCob.NCASHNUM CodCajero
             , cteRCob.Cajero
             , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DVALUEDATE AS FechaCobro
+            , CREF.DCollect AS FechaCobro
             , vpol.contratante Cliente
             , cteRCob.TipoCuota
             , TO_CHAR(cteRCob.NroCuota) AS NroCuota
@@ -759,13 +760,13 @@ SELECT
              AND CREF.NPolicy= VPOL.NPolicy
         INNER JOIN TABLE9 Suc ON CREF.noffice = suc.noffice
         OUTER APPLY (
-            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DVALUEDATE) AS TC
+            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
             FROM dual
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0               		                                     		             
         --parametros>                  
-        AND  CREF.DVALUEDATE BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
+        AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
         AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
         AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
                                                         OR NS_INSCONTROLINGRESO511.NINTERTYP IS NULL
@@ -801,7 +802,7 @@ SELECT
             , cteRCob.NCASHNUM CodCajero
             , cteRCob.Cajero
             , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DVALUEDATE AS FechaCobro
+            , CREF.DCollect AS FechaCobro
             , vpol.contratante Cliente
             , cteRCob.TipoCuota
             , TO_CHAR(cteRCob.NroCuota) AS NroCuota
@@ -850,13 +851,13 @@ SELECT
         INNER JOIN NS_View_DatosGeneralesPoliza VPOL ON  RCon.NPolicy= VPOL.NPolicy
         INNER JOIN TABLE9 Suc ON CREF.noffice = suc.noffice
         OUTER APPLY (
-            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DVALUEDATE) AS TC
+            SELECT INSUDB.GETEXCHANGE(vpol.codmonedapoliza, CREF.DCollect) AS TC
             FROM dual
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0    
         --parametros>                  
-        AND  CREF.DVALUEDATE BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
+        AND  CREF.DCollect BETWEEN NS_INSCONTROLINGRESO511.DINIDATE AND NS_INSCONTROLINGRESO511.DENDDATE			
         AND nvl(CREF.noffice,0) = CASE WHEN NVL(NS_INSCONTROLINGRESO511.NOFFICE,0)=0 THEN nvl(CREF.noffice,0)  ELSE NS_INSCONTROLINGRESO511.NOFFICE END 
         AND NVL(VPol.CodTipoIntermediario,0)=CASE WHEN NS_INSCONTROLINGRESO511.NINTERTYP=0 
                                                         OR NS_INSCONTROLINGRESO511.NINTERTYP IS NULL
