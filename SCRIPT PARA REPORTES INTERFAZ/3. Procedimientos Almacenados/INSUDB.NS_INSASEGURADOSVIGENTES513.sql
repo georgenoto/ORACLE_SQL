@@ -1,9 +1,9 @@
 CREATE OR REPLACE PROCEDURE INSUDB.NS_INSASEGURADOSVIGENTES513
 /*-------------------------------------------------------------------------------*/
 /* NOMBRE    : NS_INSASEGURADOSVIGENTES513*/
-/* OBJETIVO  : OBTENER INFORMACI�N LOS ASEGURADOS VIGENTES DE TODAS LAS POLIZAS ACTIVAS A UNA FECHA DADA        */
+/* OBJETIVO  : OBTENER INFORMACION LOS ASEGURADOS VIGENTES DE TODAS LAS POLIZAS ACTIVAS A UNA FECHA DADA        */
 /* PARAMETROS: 1 -  DFECHA_HASTA            : FECHA LIMITE DE EMISION D POLIZAS                                 */
-/*             2 -  NCOD_REGIONALPOLIZA   	: COD RREGIONAL DONDE SE EMITI� LA POLIZA                           */
+/*             2 -  NCOD_REGIONALPOLIZA   	: COD RREGIONAL DONDE SE EMITIO LA POLIZA                           */
 /*             3 -  NCOD_RAMO   	        : COD RAMO DE LA POLIZA                                         */
 /*             4 -  NCOD_PRODUCTO   	    : COD PRODUCTO DE LA POLIZA                                         */
 /*             5 -  NCOD_TIPOINTERMEDIARIO  : COD TIPO INTERMEDIARIO DE LA POLIZA                               */
@@ -65,10 +65,10 @@ INSERT INTO TIMETMP.TMP_INT513
   STIPO_INTERMEDIARIO,	
   NCOD_INTERMEDIARIO,		
   SINTERMEDIARIO,	
-  NCAPITAL_ASEGURADO_MO,
-  NCAPITAL_ASEGURADO_LO,
-  NDEDUCIBLE_MO,
-  NDEDUCIBLE_LO,  
+  NCAPITAL_ASEGURADO_BS,
+  NCAPITAL_ASEGURADO_SUS,
+  NDEDUCIBLE_BS,
+  NDEDUCIBLE_SUS,  
   SAMBITO_GEOGRAFICO,
   STIPO_RED_MEDICA,  
   SCONTRATANTE,
@@ -104,7 +104,8 @@ INSERT INTO TIMETMP.TMP_INT513
   SCOA_ODONTOLOGICO ,
   SCLINICA_ODONTOLOGICA ,
   SSEGURO_VIAJERO,
-  SEMERGENCIA_MEDICA,
+  STIENE_EMERGENCIA_MEDICA ,
+  SPROVEEDOR_EMERGENCIA_MEDICA,
   SMUERTE_ACCIDENTAL,
   SSEPELIO,  
   DFECHAFIN_CREDENCIAL,
@@ -196,7 +197,7 @@ INSERT INTO TIMETMP.TMP_INT513
               GROUP BY M.NPRODUCT, M.NMODULEC, M.NPOLICY, M.NCERTIF, M.SCLIENT            
     ) ,
     cteEmails AS (
-        -- CTE para obtener el primer correo electr�nico por cliente y p�liza
+        -- CTE para obtener el primer correo electrOnico por cliente y pOliza
         SELECT
             adrs.sclient,
             adrs.scertype,
@@ -220,11 +221,11 @@ INSERT INTO TIMETMP.TMP_INT513
         WHERE tdoc.NCLASSTYPDOC=2
     ),
     cteOtroSeguro AS (
-        -- CTE para encontrar si un cliente tiene otras p�lizas activas
+        -- CTE para encontrar si un cliente tiene otras pOlizas activas
         SELECT
             RAUX.SCLIENT,
             PRODAUX.nproduct,
-            'SI,' || PRODAUX.SDESCRIPT AS SDESCRIPT,
+            SUBSTR('SI,' || TRIM(PRODAUX.SDESCRIPT), 1, 199) AS SDESCRIPT,
             ROW_NUMBER() OVER(PARTITION BY RAUX.SCLIENT ORDER BY PAUX.NPolicy) as rn
        FROM POLICY PAUX
        INNER JOIN CERTIFICAT CAUX ON PAUX.scertype= CAUX.scertype and PAUX.Nbranch= CAUX.NBranch
@@ -235,6 +236,7 @@ INSERT INTO TIMETMP.TMP_INT513
                             AND RAUX.NROLE NOT IN (1,13,25,87)
        INNER JOIN prodmaster PRODAUX On PAUX.NBranch= PRODAUX.NBranch and PAUX.NProduct = PRODAUX.NProduct
        WHERE PAUX.SCERTYPE = '2'
+       AND PAUX.SSTATUS_POL IN (1,4,5) --TABLE181
        AND NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA BETWEEN PAUX.DSTARTDATE AND PAUX.DEXPIRDAT
        AND (RAUX.DNULLDATE IS NULL OR RAUX.DNULLDATE < NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA)
     ), TasaCambioDolar AS (    
@@ -247,7 +249,7 @@ INSERT INTO TIMETMP.TMP_INT513
            AND (e.DNULLDATE IS NULL OR e.DNULLDATE > SYSDATE) 
     ),
     ctePrimerPoliza AS (
-        -- CTE para encontrar si un cliente tiene otras p�lizas activas
+        -- CTE para encontrar si un cliente tiene otras pOlizas activas
         SELECT
             RAUX.SCLIENT,
             PAUX.NPolicy As NroPoliza,           
@@ -265,7 +267,7 @@ INSERT INTO TIMETMP.TMP_INT513
        and PAUX.SSTATUS_POL NOT IN (2,3,7,8)       
     ), cteInfoEspecial as(
        SELECT  evaRol.SCERTYPE, evaRol.NBRANCH, evaRol.NPRODUCT, evaRol.NPOLICY, evaRol.NCERTIF, evaRol.NROLE, evaRol.SCLIENT
-               ,TRIM(T9216.SDESCRIPT) || '' || evaRol.NNOTENUM AS InfoEspecial
+               ,SUBSTR(TRIM(T9216.SDESCRIPT) || ' ' || TO_CHAR(evaRol.NNOTENUM), 1, 299) AS InfoEspecial
                ,ROW_NUMBER() OVER(PARTITION BY evaRol.NPOLICY, evaRol.SCLIENT ORDER BY evaRol.NPOLICY ASC) as rn
        FROM MEDICAL_EVAL_ROL evaRol
        INNER JOIN TABLE9216 T9216 ON evaRol.NMEDICALSTAT= T9216.NMEDICALSTAT 
@@ -273,15 +275,36 @@ INSERT INTO TIMETMP.TMP_INT513
        AND evaRol.NROLE NOT IN (1,13,25,87)
     ),cteExclusionesCarencia as (
             SELECT excl.scertype,excl.NBranch,excl.NProduct,excl.NPolicy,excl.sclient 
-                ,SUBSTR(LISTAGG( TRIM(CASE WHEN excl.STYPE_EXC=1 
-                                      THEN TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)                     
-                                      END ), ', ') WITHIN GROUP(ORDER BY excl.NPolicy,excl.sclient), 1, 200) AS Exclusiones
-                ,SUBSTR(LISTAGG( TRIM(CASE WHEN excl.STYPE_EXC=2 THEN
-                                              CASE WHEN (excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NOT NULL ) THEN TRIM(desExc.sdescript)  || ' Desde: ' || TO_CHAR( NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY')  || ' Hasta: ' || TO_CHAR( NVL(excl.DEND_DATE, SYSDATE), 'DD-MM-YYYY')|| ' ' || TRIM(excl.sdescript)
-                                                 WHEN (excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NULL) THEN  TRIM(desExc.sdescript)  || ' Desde: ' || TO_CHAR( NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY')  || ' ' || TRIM(excl.sdescript)                 
-                                                 ELSE TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)
-                                                 END                    
-                                      END ), ', ') WITHIN GROUP(ORDER BY excl.NPolicy,excl.sclient), 1, 200) AS CarenciasParticulares
+                ,SUBSTR(
+                    RTRIM(
+                        XMLAGG(
+                            XMLELEMENT(E,
+                                CASE WHEN excl.STYPE_EXC=1 THEN
+                                    TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript) || ', '
+                                END
+                            )
+                            ORDER BY excl.NPolicy,excl.sclient
+                        ).EXTRACT('//text()').getClobVal()
+                    , ', ')
+                , 1, 200) AS Exclusiones
+                ,SUBSTR(
+                    RTRIM(
+                        XMLAGG(
+                            XMLELEMENT(E,
+                                CASE WHEN excl.STYPE_EXC=2 THEN
+                                    CASE WHEN excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NOT NULL THEN
+                                        TRIM(desExc.sdescript) || ' Desde: ' || TO_CHAR(NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY') || ' Hasta: ' || TO_CHAR(NVL(excl.DEND_DATE, SYSDATE), 'DD-MM-YYYY') || ' ' || TRIM(excl.sdescript)
+                                    WHEN excl.DINIT_DATE IS NOT NULL AND excl.DEND_DATE IS NULL THEN
+                                        TRIM(desExc.sdescript) || ' Desde: ' || TO_CHAR(NVL(excl.DINIT_DATE, SYSDATE), 'DD-MM-YYYY') || ' ' || TRIM(excl.sdescript)
+                                    ELSE
+                                        TRIM(desExc.sdescript) || ' ' || TRIM(excl.sdescript)
+                                    END || ', '
+                                END
+                            )
+                            ORDER BY excl.NPolicy,excl.sclient
+                        ).EXTRACT('//text()').getClobVal()
+                    , ', ')
+                , 1, 200) AS CarenciasParticulares
                 FROM TAB_AM_EXC excl 
                 LEFT JOIN TAB_AM_ILL desExc On excl.SILLNESS= desExc.SILLNESS    
                 WHERE  excl.DNULLDATE IS NULL
@@ -293,90 +316,99 @@ INSERT INTO TIMETMP.TMP_INT513
         vPol.SCERTYPE,
         ROW_NUMBER() OVER(ORDER BY vpol.CodRegionalPoliza,vpol.NPOLICY, cert.NCERTIF,rolAse.NCOVERPOS) AS NroTotalAsegurado,
         ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NroAseguradoPorCuenta,
-        VPOL.nproduct,
-        vpol.producto,
-        VPOL.nproduct || ' - ' || vpol.ProductoAbreviado,
-        '' AS Plan,
-        vpol.tipopoliza As TipoPoliza,
-        vpol.TipoFacturaColectivo,
-        vpol.TipoDistribucion,
+        SUBSTR(UPPER(VPOL.nproduct),1,20) NPRODUCT,
+        SUBSTR(UPPER(TRIM(vpol.producto)),1,199) PRODUCTO,
+        SUBSTR(UPPER(SUBSTR(TRIM(VPOL.nproduct),1,100)) || ' - ' || UPPER(SUBSTR(TRIM(vpol.ProductoAbreviado),1,90)),1,199) PRODUCTOABREVIADO,
+        NULL AS Plan,
+        SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPOPOLIZA,
+        SUBSTR(UPPER(TRIM(vpol.TipoFacturaColectivo)),1,199) AS TIPOFACTURACOLECTIVO,
+        SUBSTR(UPPER(TRIM(vpol.TipoDistribucion)),1,199) AS TIPODISTRIBUCION ,
         VPOL.npolicy,
         vpol.codMonedaPoliza,
-        vpol.MonedaPoliza,
+        UPPER(TRIM(vpol.MonedaPoliza)) AS MONEDAPOLIZA,
         vpol.fechaemision,
         vpol.iniciovigenciapoliza,
         vpol.finvigenciapoliza,
         vpol.codestadopoliza,
-        (CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA , 'YYYYMMDD') 
-                THEN 'Vencida' 
-                ELSE vpol.estadopoliza  
-               END) as estadopoliza,
-        --vpol.estadopoliza,
+        SUBSTR((CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA , 'YYYYMMDD') 
+                THEN 'VENCIDA' 
+                ELSE UPPER(TRIM(vpol.estadopoliza))  
+               END),1,199) as estadopoliza,        
         vpol.CodRegionalPoliza,
-        vpol.RegionalPoliza,
+        SUBSTR(UPPER(TRIM(vpol.RegionalPoliza)),1,199) REGIONALPOLIZA,
         vpol.codtipointermediario,
-        vpol.TipoIntermediario,
+        SUBSTR(UPPER(TRIM(vpol.TipoIntermediario)),1,99) TIPOINTERMEDIARIO,
         vpol.codintermediario,
-        vpol.intermediario,        
-        cd.CapitalAsegurado,
-        CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.CapitalAsegurado,0) ELSE nvl(cd.CapitalAsegurado,0) * Tasa.TC_DOLAR END CapitalAseguradoLO,
-        NVL(cd.NDEDUCIBLE, 0) AS NDEDUCIBLE_MO,
-        NVL(cd.NDEDUCIBLE, 0) * vpol.tc AS NDEDUCIBLE_LO,
-        TRIM(ambgeo.sdescript) As AmbitoGeografico,
-        TRIM(sisate.sdescript) As SistemaAtencion,
-        vpol.contratante,
+        SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.intermediario), '[.,]', '')),1,299) INTERMEDIARIO,         
+        CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.CapitalAsegurado,0) ELSE NULL END CapitalAseguradoBS,
+        CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.CapitalAsegurado,0) ELSE NULL END CapitalAseguradoSUS,
+        CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END NDEDUCIBLEBS,
+        CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END NDEDUCIBLESUS,
+        SUBSTR(UPPER(TRIM(ambgeo.sdescript)),1,199) AS AMBITOGEORGRAFICO,
+        SUBSTR(UPPER(TRIM(sisate.sdescript)),1,299) As SISTEMAATENCION,
+        SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.contratante), '[.,]', '')),1,499) CONTRATANTE,
         cert.ncertif AS NroCertificado,
         aseg.sclient CodigoAsegurado,
-        INITCAP(LOWER(RTRIM(aseg.sfirstname))) AS NombreAsegurado,
-        INITCAP(LOWER(RTRIM(aseg.slastname))) || ' ' || INITCAP(LOWER(RTRIM(aseg.slastname2))) As ApellidosAsegurado,
+        SUBSTR(UPPER(RTRIM(aseg.sfirstname)),1,800) AS NombreAsegurado,
+        SUBSTR(UPPER(SUBSTR(RTRIM(aseg.slastname),1,400)) || ' ' || UPPER(SUBSTR(RTRIM(aseg.slastname2),1,400)),1,800) As ApellidosAsegurado,
         (CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA , 'YYYYMMDD') 
-                THEN 'Vencida'
+                THEN 'VENCIDA'
                 ELSE    CASE WHEN rolAse.nstatusrol=1 
                            THEN CASE WHEN rolAse.Dnulldate is null THEN TRIM(ease.sdescript) ELSE 'Excluido' END  
-                           ELSE TRIM(ease.sdescript) END 
+                           ELSE UPPER(TRIM(ease.sdescript)) END 
                END)   as EstadoAsegurado,
-        TRIM(sexo.sdescript) As Genero,
-        TRIM(crol.sdescript) As Relacion,
-        TPer.sdescript TipoPersona,
-        tblDocumento.tipoDocumentoCorto,
+        UPPER(TRIM(sexo.sdescript)) As Genero,
+        CASE crol.nrole WHEN 22  THEN DECODE(sexo.SSEXCLIEN,1, 'HIJA', 'HIJO')
+                        WHEN 24  THEN DECODE(sexo.SSEXCLIEN,1, 'HERMANA', 'HERMANO')
+                        WHEN 32  THEN DECODE(sexo.SSEXCLIEN,1, 'SOBRINA', 'SOBRINO')
+                        WHEN 33  THEN DECODE(sexo.SSEXCLIEN,1, 'TIA', 'TIO')
+                        WHEN 67  THEN DECODE(sexo.SSEXCLIEN,1, 'NIETA', 'NIETO')
+                        WHEN 68  THEN DECODE(sexo.SSEXCLIEN,1, 'ABUELA', 'ABUELO')
+                        ELSE UPPER(TRIM(crol.sdescript))
+                        END Relacion,
+       
+        SUBSTR(UPPER(TRIM(TPer.sdescript)),1,199) AS TIPOPERSONA,
+        SUBSTR(UPPER(TRIM(tblDocumento.tipoDocumentoCorto)),1,199) TIPODOCUMENTOCORTO,
         tblDocumento.nrodocumento,
-        tblDocumento.Complemento,
+        UPPER(TRIM(tblDocumento.Complemento)) COMPLEMENTO,
         rolAse.dbirthdate As FechaNacimiento,
         trunc(months_between(sysdate,rolAse.dbirthdate)/12) Edad,
-        TRIM(cresi.sdescript) as CiudadResidencia,
+        SUBSTR(UPPER(TRIM(cresi.sdescript)),1,199) AS CIUDADRESIDENCIA,
         tblPP.InicioVigencia as  FechaIngreso,        
         cd.FechaAntiguedad AS FechaAntiguedad,
         cd.CapitalAntiguedad as CapitalAntiguedad,
         rolAse.deffecdate as FechaInclusion, 
         rolAse.dnulldate as FechaExclusion,        
-        tblCorreo.EmailAsegurado,
-        EXCL.Exclusiones,
-        EXCL.CarenciasParticulares,        
-        tblInfo.InfoEspecial AS InformacionEspecial, 
-        NVL(tblOtroSeguro.SDESCRIPT,'NO') As OtroSeguro,
-        NVL(cd.TieneMaternidad,'NO') AS TieneMaternidad,
+        SUBSTR(UPPER(TRIM(tblCorreo.EmailAsegurado)),1,299) EMAILASEGURADO,
+        SUBSTR(UPPER(TRIM(EXCL.Exclusiones)),1,299) EXCLUSIONES,
+        SUBSTR(UPPER(TRIM(EXCL.CarenciasParticulares)),1,299) CONDICIONESPARTICULARES,        
+        SUBSTR(UPPER(TRIM(tblInfo.InfoEspecial)),1,299) AS INFORMACIONESPECIAL, 
+        NVL(UPPER(tblOtroSeguro.SDESCRIPT),'NO') As OtroSeguro,
+        NVL(UPPER(cd.TieneMaternidad),'NO') AS TieneMaternidad,
         NVL(tblBene.porcentajeambulatorio,0) AS porcentajeambulatorio,
         NVL(tblBene.porcentajehospitalario,0) AS porcentajehospitalario,        
         NVL(tblBene.PorcAmbulatorioMedicamentos,0) AS PorcAmbulatorioMedicamentos,
-        NVL(cd.TieneOdontologia,'NO') AS TieneOdontologia,
-         CASE WHEN NVL(cd.coaseguroodontologico,0) <> 0 THEN 
+        NVL(UPPER(cd.TieneOdontologia),'NO') AS TieneOdontologia,
+        SUBSTR(UPPER(CASE WHEN NVL(cd.coaseguroodontologico,0) <> 0 THEN 
                             CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'  
                             ELSE '$US.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'   END 
-        ELSE '' END,
+        ELSE '' END),1,499) COASEGUROODONTOLOGICO,
         --cd.coaseguroodontologico,
-        cd.clinicaodontologica,
-        NVL(cd.SeguroAlViajero,'NO') AS SeguroAlViajero,
-        NVL(cd.EmergenciaMedicas,'NO') AS EmergenciaMedicas,
-        NVL(cd.MuerteAccidental,'NO') AS MuerteAccidental,
-        NVL(cd.Sepelio,'NO') AS Sepelio,
+        SUBSTR(UPPER(REGEXP_REPLACE(TRIM(cd.clinicaodontologica), '[.,]', '')),1,499) CLINICAODONTOLOGICA,
+        NVL(UPPER(cd.SeguroAlViajero),'NO') AS SeguroAlViajero,
+        CASE WHEN cd.EmergenciaMedicas IS NULL THEN 'NO' ELSE 'SI' END TIENEEMERGENCIAMEDICAS,
+        SUBSTR(UPPER(REGEXP_REPLACE(TRIM(NVL(cd.EmergenciaMedicas,'')), '[.,]', '')),1,499) EMERGENCIAMEDICAS,
+        NVL(UPPER(cd.MuerteAccidental),'NO') AS MuerteAccidental,
+        NVL(UPPER(cd.Sepelio),'NO') AS Sepelio,
         null as FechaFinCredencial,
-        CASE WHEN NVL(tblBene.Consulta_Coaseguro,0) <> 0 THEN 
+        UPPER(CASE WHEN NVL(tblBene.Consulta_Coaseguro,0) <> 0 THEN 
                             CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'  
                             ELSE '$US.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'   END 
-        ELSE '' END As Condiciones,
+        ELSE '' END) As Condiciones,
+       
         '' As Observaciones,
         CASE WHEN vpol.CodMonedaPoliza = 1 THEN 1 ELSE Tasa.TC_DOLAR END AS TIPO_CAMBIO,
-        ECert.sdescript As EstadoCertificado
+        UPPER(TRIM(ECert.sdescript)) As EstadoCertificado
     FROM NS_View_DatosGeneralesPoliza vpol
     INNER JOIN Certificat cert On vpol.scertype= Cert.scertype and vpol.Nbranch= Cert.NBranch
                                 and vpol.NProduct= Cert.NProduct and vpol.NPolicy = Cert.NPolicy
@@ -426,9 +458,9 @@ INSERT INTO TIMETMP.TMP_INT513
     AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
     --AND VPOL.NROPOLIZA in (1185)
     --parametros> 
-    /* Fecha de emisión vs corte (manejo nativo DATE, evitar conversiones innecesarias) */
     AND vPol.FechaEmision <= NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA
-    AND TO_CHAR(SYSDATE , 'YYYYMMDD') BETWEEN  TO_CHAR(vpol.InicioVigenciaPoliza, 'YYYYMMDD')  AND TO_CHAR(vpol.FinVigenciaPoliza, 'YYYYMMDD') 
+    --AND TO_CHAR(SYSDATE , 'YYYYMMDD') BETWEEN  TO_CHAR(vpol.InicioVigenciaPoliza, 'YYYYMMDD')  AND TO_CHAR(vpol.FinVigenciaPoliza, 'YYYYMMDD') 
+    AND TO_CHAR(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA , 'YYYYMMDD') <= TO_CHAR(vpol.FinVigenciaPoliza, 'YYYYMMDD')
     AND VPol.CodRegionalPoliza = CASE WHEN NVL(NS_INSASEGURADOSVIGENTES513.NCOD_REGIONALPOLIZA,0)=0 
                                       THEN VPol.CodRegionalPoliza ELSE NS_INSASEGURADOSVIGENTES513.NCOD_REGIONALPOLIZA END                 
     AND NVL(vpol.codproducto,0) = CASE WHEN NVL(NS_INSASEGURADOSVIGENTES513.NCOD_PRODUCTO,0)=0 
