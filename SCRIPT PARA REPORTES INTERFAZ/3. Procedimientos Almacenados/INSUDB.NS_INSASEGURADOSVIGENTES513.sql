@@ -112,7 +112,9 @@ INSERT INTO TIMETMP.TMP_INT513
   SCONDICIONES_COASEGURO_CONSULTA ,  
   SOBSERVACIONES,
   NTIPO_CAMBIO,
-  SESTADO_CERTIFICADO
+  SESTADO_CERTIFICADO,
+  STIPO_PERSONA_CONT,
+  SLUGAR_NAC_PERS
 )
     WITH cteCoberturas AS (
         -- CTE para detalles de cobertura, sin cambios
@@ -365,8 +367,7 @@ INSERT INTO TIMETMP.TMP_INT513
                         WHEN 67  THEN DECODE(sexo.SSEXCLIEN,1, 'NIETA', 'NIETO')
                         WHEN 68  THEN DECODE(sexo.SSEXCLIEN,1, 'ABUELA', 'ABUELO')
                         ELSE UPPER(TRIM(crol.sdescript))
-                        END Relacion,
-       
+                        END Relacion,      
         SUBSTR(UPPER(TRIM(TPer.sdescript)),1,199) AS TIPOPERSONA,
         SUBSTR(UPPER(TRIM(tblDocumento.tipoDocumentoCorto)),1,199) TIPODOCUMENTOCORTO,
         tblDocumento.nrodocumento,
@@ -404,11 +405,13 @@ INSERT INTO TIMETMP.TMP_INT513
         UPPER(CASE WHEN NVL(tblBene.Consulta_Coaseguro,0) <> 0 THEN 
                             CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'  
                             ELSE '$US.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'   END 
-        ELSE '' END) As Condiciones,
-       
+        ELSE '' END) As Condiciones,       
         '' As Observaciones,
         CASE WHEN vpol.CodMonedaPoliza = 1 THEN 1 ELSE Tasa.TC_DOLAR END AS TIPO_CAMBIO,
-        UPPER(TRIM(ECert.sdescript)) As EstadoCertificado
+        UPPER(TRIM(ECert.sdescript)) As EstadoCertificado,
+        SUBSTR(UPPER(TRIM(TP_CONT.sdescript)),1,199) AS TIPO_PERSONA,
+        SUBSTR(UPPER(TRIM(NVL(LUGNAC.sdescript,'BOLIVIA'))),1,199) AS LUGAR_NACIMIENTO
+        
     FROM NS_View_DatosGeneralesPoliza vpol
     INNER JOIN Certificat cert On vpol.scertype= Cert.scertype and vpol.Nbranch= Cert.NBranch
                                 and vpol.NProduct= Cert.NProduct and vpol.NPolicy = Cert.NPolicy
@@ -418,6 +421,7 @@ INSERT INTO TIMETMP.TMP_INT513
                             AND rolAse.NROLE NOT IN (1,13,25,87,91)
                             and (rolAse.dnulldate is null or NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA < rolAse.dnulldate)
     INNER JOIN Client aseg on rolAse.sclient = aseg.sclient
+    INNER JOIN CLIENT CONT ON vpol.CODCONTRATANTE = CONT.SCLIENT
     INNER JOIN MODUL_INSURED planaseg On Cert.scertype= planaseg.scertype and Cert.Nbranch= planaseg.NBranch
                                        and Cert.NProduct= planaseg.NProduct and Cert.NPolicy = planaseg.NPolicy
                                        and cert.ncertif= planaseg.ncertif
@@ -433,7 +437,9 @@ INSERT INTO TIMETMP.TMP_INT513
     LEFT JOIN table66 pres ON aseg.nresidencecountry= pres.ncountry
     LEFT JOIN table18 sexo ON rolAse.ssexclien= sexo.ssexclien
     LEFT JOIN table9 cresi On rolAse.ncity_residence= cresi.noffice
+    LEFT JOIN TABLE66 LUGNAC ON aseg.NBIRTHCOUNTRY = LUGNAC.NCOUNTRY
     LEFT JOIN Table5006 TPer On aseg.nperson_typ= tper.nperson_typ
+    LEFT JOIN TABLE5006 TP_CONT ON CONT.NPERSON_TYP	= TP_CONT.NPERSON_TYP
     LEFT JOIN cteEmails tblCorreo ON tblCorreo.sclient = aseg.sclient AND tblCorreo.scertype = vpol.scertype AND tblCorreo.npolicy = vpol.npolicy AND tblCorreo.rn = 1
     LEFT JOIN cteDocCliente tblDocumento ON tblDocumento.sclient = rolAse.sclient AND tblDocumento.rn = 1
     LEFT JOIN cteOtroSeguro tblOtroSeguro ON tblOtroSeguro.SCLIENT = ASEG.SCLIENT AND tblOtroSeguro.nproduct <> vpol.nproduct AND tblOtroSeguro.rn = 1
@@ -453,6 +459,7 @@ INSERT INTO TIMETMP.TMP_INT513
                                                 AND Cert.NProduct=excl.NProduct AND Cert.NPolicy = excl.NPolicy
                                                 AND aseg.sclient=excl.sclient                                             
     LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
+    
     WHERE vPol.SCERTYPE = '2' 
     AND vpol.codestadopoliza NOT IN (2,3,6,7,8) -- SE QUITAN LAS POLIZAS QUE NO ESTAN ACTIVAS
     AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
