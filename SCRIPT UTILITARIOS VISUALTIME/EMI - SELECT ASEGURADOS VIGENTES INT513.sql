@@ -24,7 +24,8 @@ WITH cteCoberturas AS (
             NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92220 THEN 'SI' END), 'NO') AS MuerteAccidental,
             NVL(MAX(CASE WHEN TLCOB.NCOVERGEN = 92230 THEN 'SI' END), 'NO') AS Sepelio,
             
-            MAX(NVL(BENEF.NDED_TYPE, '0')) AS NDEDUCIBLE,
+            --MAX(NVL(BENEF.NDED_TYPE, '0')) AS NDEDUCIBLE,
+            MAX('N/A') AS NDEDUCIBLE, 
             MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.NCAPITAL ELSE 0 END) AS CapitalAsegurado,
             MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.DANTIDATE END) AS FechaAntiguedad,
             MAX(CASE WHEN TLCOB.NCOVERGEN = 92000 THEN COB.NANTI_AMOUNT END) AS CapitalAntiguedad
@@ -245,8 +246,10 @@ WITH cteCoberturas AS (
         ,rolAse.dbirthdate As FECHA_NACIMIENTO                     
         ,trunc(months_between(sysdate,rolAse.dbirthdate)/12) EDAD       
         ,aseg.sclient AS COD_ASEGURADO
-        ,SUBSTR(UPPER(TRIM(EXCL.Exclusiones)),1,299) EXCLUSIONES_PARTICULARES
-        ,SUBSTR(UPPER(TRIM(EXCL.CarenciasParticulares)),1,299) CARENCIAS_PARTICULARES        
+        ,DBMS_LOB.SUBSTR(EXCL.Exclusiones, 950, 1) EXCLUSIONES_PARTICULARES
+        ,DBMS_LOB.SUBSTR(EXCL.CarenciasParticulares, 950, 1) CARENCIAS_PARTICULARES
+        --,SUBSTR(UPPER(TRIM(EXCL.Exclusiones)),1,299) EXCLUSIONES_PARTICULARES
+        --,SUBSTR(UPPER(TRIM(EXCL.CarenciasParticulares)),1,299) CARENCIAS_PARTICULARES        
         ,SUBSTR(UPPER(TRIM(tblInfo.InfoEspecial)),1,299) AS INFORMACION_ESPECIAL 
         ,NVL(UPPER(tblOtroSeguro.SDESCRIPT),'NO') As OTRO_SEGURO
         ,NVL(UPPER(cd.TieneMaternidad),'NO') AS COB_MATERNIDAD
@@ -254,10 +257,11 @@ WITH cteCoberturas AS (
         ,NVL(tblBene.porcentajehospitalario,0) AS PORC_HOSPITALARIA        
         ,NVL(tblBene.PorcAmbulatorioMedicamentos,0) AS PORC_MEDICAMENTOS_AMBULATORIOS
         ,NVL(UPPER(cd.TieneOdontologia),'NO') AS COB_ADICIONAL_ODONTOLOGICA
-        ,SUBSTR(UPPER(CASE WHEN NVL(cd.coaseguroodontologico,0) <> 0 THEN 
-                            CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'  
-                            ELSE '$US.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'   END 
-        ELSE '' END),1,499) COASEGURO_ODONTOLOGICO
+--        ,SUBSTR(UPPER(CASE WHEN NVL(cd.coaseguroodontologico,0) <> 0 THEN 
+--                            CASE WHEN vpol.CodMonedaPoliza = 1 THEN 'Bs.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'  
+--                            ELSE '$US.- ' || TO_CHAR(cd.coaseguroodontologico) || ' COASEGURO CONSULTAS'   END 
+--        ELSE '' END),1,499) COASEGURO_ODONTOLOGICO
+        , CASE WHEN NVL(UPPER(cd.TieneOdontologia),'NO') = 'NO' THEN NULL ELSE 'BS 70' END COASEGURO_ODONTOLOGICO
         ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(cd.clinicaodontologica), '[.,]', '')),1,499) CLINICA_ODONTOLOGICA
         ,NVL(UPPER(cd.SeguroAlViajero),'NO') AS SEGURO_VIAJERO
         ,CASE WHEN cd.EmergenciaMedicas IS NULL THEN 'NO' ELSE 'SI' END EMERGENCIA_MEDICA
@@ -271,7 +275,7 @@ WITH cteCoberturas AS (
                             ELSE '$US.- ' || TO_CHAR(tblBene.Consulta_Coaseguro) || ' COASEGURO CONSULTAS'   END 
         ELSE '' END) As COND_COASEGURO_CONSULTA 
         ,SUBSTR(UPPER(TRIM(tblCorreo.EmailAsegurado)),1,299) CORREO_ASEGURADO
-        ,SUBSTR(UPPER(TRIM(TPer.sdescript)),1,199) AS TIPO_PERSONA_ASEGURADO
+        --,SUBSTR(UPPER(TRIM(TPer.sdescript)),1,199) AS TIPO_PERSONA_ASEGURADO
         
         
 --        VPOL.nbranch,
