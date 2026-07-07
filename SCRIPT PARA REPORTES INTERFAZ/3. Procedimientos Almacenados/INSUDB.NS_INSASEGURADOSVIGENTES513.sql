@@ -312,6 +312,10 @@ INSERT INTO TIMETMP.TMP_INT513
                 LEFT JOIN TAB_AM_ILL desExc On excl.SILLNESS= desExc.SILLNESS    
                 WHERE  excl.DNULLDATE IS NULL
                 GROUP BY excl.scertype, excl.NBranch, excl.NProduct, excl.NPolicy, excl.sclient
+    ), cteAmpliacionVigencia AS (
+      SELECT  HIS.NBRANCH, HIS.NPRODUCT, HIS.NPOLICY, HIS.NMOVEMENT, HIS.DEFFECDATE
+        FROM POLICY_HIS HIS
+        WHERE HIS.SCERTYPE=2 AND NTYPE_AMEND=9224 AND DNULLDATE IS NULL
     )
     SELECT
         NS_INSASEGURADOSVIGENTES513.SKEY
@@ -342,24 +346,27 @@ INSERT INTO TIMETMP.TMP_INT513
         ,vpol.codtipointermediario
         ,SUBSTR(UPPER(TRIM(vpol.TipoIntermediario)),1,99) TIPOINTERMEDIARIO
         ,vpol.codintermediario
-        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.intermediario), '[.,]', '')),1,299) INTERMEDIARIO         
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(vpol.intermediario, '[.,]'))),1,299) INTERMEDIARIO         
         ,CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.CapitalAsegurado,0) ELSE NULL END CapitalAseguradoBS
         ,CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.CapitalAsegurado,0) ELSE NULL END CapitalAseguradoSUS
         ,CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END NDEDUCIBLEBS
         ,CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END NDEDUCIBLESUS
         ,SUBSTR(UPPER(TRIM(ambgeo.sdescript)),1,199) AS AMBITOGEORGRAFICO
-        ,SUBSTR(UPPER(TRIM(sisate.sdescript)),1,299) As SISTEMAATENCION
-        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.contratante), '[.,]', '')),1,499) CONTRATANTE
+        ,CASE WHEN vpol.NPRODUCT IN (2,3) THEN 'SEGUNDA RED' ELSE 'PRIMERA RED' END As SISTEMAATENCION
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(vpol.contratante, '[.,]'))), 1, 499) CONTRATANTE
         ,cert.ncertif AS NroCertificado
         ,aseg.sclient CodigoAsegurado
-        ,SUBSTR(UPPER(RTRIM(aseg.sfirstname)),1,800) AS NombreAsegurado
-        ,SUBSTR(UPPER(SUBSTR(RTRIM(aseg.slastname),1,400)) || ' ' || UPPER(SUBSTR(RTRIM(aseg.slastname2),1,400)),1,800) As ApellidosAsegurado
-        ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(NS_INSASEGURADOSVIGENTES513.DFECHA_HASTA , 'YYYYMMDD') 
-                THEN 'VENCIDA'
-                ELSE    CASE WHEN rolAse.nstatusrol=1 
-                           THEN CASE WHEN rolAse.Dnulldate is null THEN TRIM(ease.sdescript) ELSE 'Excluido' END  
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.sfirstname, '[.,]'))), 1, 800) AS NombreAsegurado
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.slastname || ' ' || aseg.slastname2, '[.,]'))), 1, 840)As ApellidosAsegurado
+        ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(SYSDATE , 'YYYYMMDD') 
+            THEN 'VENCIDA'
+            ELSE    CASE WHEN rolAse.nstatusrol=1 
+                             THEN 
+                                    CASE WHEN rolAse.Dnulldate IS NULL 
+                                    THEN  CASE WHEN CAmp.NPolicy IS NULL  THEN  UPPER(TRIM(ease.sdescript)) ELSE   'VIGENTE CON AMPLIACION DE VIGENCIA '  END
+                                    ELSE 'EXCLUIDO' END  
                            ELSE UPPER(TRIM(ease.sdescript)) END 
-               END)   as EstadoAsegurado
+          END)   as EstadoAsegurado
         ,UPPER(TRIM(sexo.sdescript)) As Genero
         ,CASE crol.nrole WHEN 22  THEN DECODE(sexo.SSEXCLIEN,1, 'HIJA', 'HIJO')
                         WHEN 24  THEN DECODE(sexo.SSEXCLIEN,1, 'HERMANA', 'HERMANO')
@@ -463,6 +470,7 @@ INSERT INTO TIMETMP.TMP_INT513
                                                 AND Cert.NProduct=excl.NProduct AND Cert.NPolicy = excl.NPolicy
                                                 AND aseg.sclient=excl.sclient                                             
     LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
+    LEFT JOIN cteAmpliacionVigencia CAmp ON vpol.NBRANCH= CAmp.NBRANCH AND vpol.NProduct = CAmp.NProduct AND vpol.NPOLICY=CAmp.NPolicy 
     
     WHERE vPol.SCERTYPE = '2' 
     AND vpol.codestadopoliza NOT IN (2,3,6,7,8) -- SE QUITAN LAS POLIZAS QUE NO ESTAN ACTIVAS

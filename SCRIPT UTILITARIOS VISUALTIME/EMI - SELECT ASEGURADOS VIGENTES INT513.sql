@@ -194,15 +194,19 @@ WITH cteCoberturas AS (
                 LEFT JOIN TAB_AM_ILL desExc On excl.SILLNESS= desExc.SILLNESS    
                 WHERE  excl.DNULLDATE IS NULL
                 GROUP BY excl.scertype, excl.NBranch, excl.NProduct, excl.NPolicy, excl.sclient
+    ), cteAmpliacionVigencia AS (
+      SELECT  HIS.NBRANCH, HIS.NPRODUCT, HIS.NPOLICY, HIS.NMOVEMENT, HIS.DEFFECDATE
+        FROM POLICY_HIS HIS
+        WHERE HIS.SCERTYPE=2 AND NTYPE_AMEND=9224 AND DNULLDATE IS NULL
     )
     SELECT
 
         ROW_NUMBER() OVER(ORDER BY vpol.CodRegionalPoliza,vpol.NPOLICY, cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADO
         ,ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADOXCUENTA
-        ,SUBSTR(UPPER(TRIM(vpol.producto)),1,199) PRODUCTO
-        ,SUBSTR(UPPER(SUBSTR(TRIM(VPOL.nproduct),1,100)) || ' - ' || UPPER(SUBSTR(TRIM(vpol.ProductoAbreviado),1,90)),1,199) AS DESCRIPCION_ABREVIADA
+        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.producto), '[.,-]', '')),1,199) PRODUCTO
+        ,SUBSTR(UPPER(SUBSTR(TRIM(VPOL.nproduct),1,100)) || ' ' || UPPER(SUBSTR(TRIM(vpol.ProductoAbreviado),1,90)),1,199) AS DESCRIPCION_ABREVIADA
         ,SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPO_POLIZA
-        ,vpol.fechaemision AS FECHA_EMISION_POLIZA
+        ,TO_CHAR(vpol.fechaemision , 'DD-MM-YYYY') AS FECHA_EMISION_POLIZA
         ,SUBSTR(UPPER(TRIM(vpol.RegionalPoliza)),1,199) AS REGIONALPOLIZA
         ,VPOL.npolicy AS NRO_POLIZA
         ,cert.ncertif AS NRO_CERTIFICADO
@@ -211,25 +215,29 @@ WITH cteCoberturas AS (
         ,CASE WHEN vpol.CodMonedaPoliza = 1 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END DEDUCIBLE_BS
         ,CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END DEDUCIBLE_SUS
         ,SUBSTR(UPPER(TRIM(ambgeo.sdescript)),1,199) AS AMBITO_GEOGRAFICO
-        ,SUBSTR(UPPER(TRIM(sisate.sdescript)),1,299) As TIPO_RED_MEDICA
-        ,SUBSTR(UPPER(TRIM(TP_CONT.sdescript)),1,199) AS TIPO_PERSONA_CONTRATANTE
+        --,SUBSTR(UPPER(TRIM(sisate.sdescript)),1,299) As TIPO_RED_MEDICA
+        ,CASE WHEN vpol.NPRODUCT IN (2,3) THEN 'SEGUNDA RED' ELSE 'PRIMERA RED' END AS TIPO_RED_MEDICA
+        ,SUBSTR(UPPER(TRIM(TP_CONT.sshort_des)),1,199) AS TIPO_PERSONA_CONTRATANTE
         ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.contratante), '[.,]', '')),1,499) CONTRATANTE
         ,SUBSTR(UPPER(TRIM(cresi.sdescript)),1,199) AS CIUDAD_RESIDENCIA_ASEGURADO
-        ,tblPP.InicioVigencia as  FECHA_INGRESO        
-        ,cd.FechaAntiguedad AS FECHA_ANTIGUEDAD
+        ,TO_CHAR(tblPP.InicioVigencia , 'DD-MM-YYYY')  as  FECHA_INGRESO        
+        ,TO_CHAR(cd.FechaAntiguedad , 'DD-MM-YYYY') AS FECHA_ANTIGUEDAD
         ,cd.CapitalAntiguedad as VALOR_ASEGURADO_ANTIGUEDAD
         ,TO_CHAR(rolAse.deffecdate , 'DD-MM-YYYY')  as FECHA_INCLUSION_ASEGURADO 
         ,TO_CHAR(rolAse.dnulldate , 'DD-MM-YYYY')  as FECHA_EXCLUSION_ASEGURADO       
         ,TO_CHAR(vpol.iniciovigenciapoliza , 'DD-MM-YYYY')  AS INICIO_VIGENCIA_POLIZA
         ,TO_CHAR(vpol.finvigenciapoliza , 'DD-MM-YYYY')  AS TERMINO_VIGENCIA_POLIZA
         ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(SYSDATE , 'YYYYMMDD') 
-                THEN 'VENCIDA'
-                ELSE    CASE WHEN rolAse.nstatusrol=1 
-                           THEN CASE WHEN rolAse.Dnulldate is null THEN TRIM(ease.sdescript) ELSE 'Excluido' END  
+            THEN 'VENCIDA'
+            ELSE    CASE WHEN rolAse.nstatusrol=1 
+                             THEN 
+                                    CASE WHEN rolAse.Dnulldate IS NULL 
+                                    THEN  CASE WHEN CAmp.NPolicy IS NULL  THEN  UPPER(TRIM(ease.sdescript)) ELSE   'VIGENTE CON AMPLIACION DE VIGENCIA '  END
+                                    ELSE 'EXCLUIDO' END  
                            ELSE UPPER(TRIM(ease.sdescript)) END 
-               END)   as ESTADO_ASEGURADO
-        ,SUBSTR(UPPER(RTRIM(aseg.sfirstname)),1,800) AS NOMBRE_ASEGURADO
-        ,SUBSTR(UPPER(SUBSTR(RTRIM(aseg.slastname),1,400)) || ' ' || UPPER(SUBSTR(RTRIM(aseg.slastname2),1,400)),1,800) As APELLIDOS_ASEGURADO       
+          END)   as ESTADO_ASEGURADO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.sfirstname, '[.,]'))), 1, 800) AS NOMBRE_ASEGURADO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.slastname || ' ' || aseg.slastname2, '[.,]'))), 1, 840) AS APELLIDOS_ASEGURADO      
         ,UPPER(TRIM(sexo.sdescript)) As GENERO
         ,CASE crol.nrole WHEN 22  THEN DECODE(sexo.SSEXCLIEN,1, 'HIJA', 'HIJO')
                         WHEN 24  THEN DECODE(sexo.SSEXCLIEN,1, 'HERMANA', 'HERMANO')
@@ -243,7 +251,7 @@ WITH cteCoberturas AS (
         ,tblDocumento.nrodocumento AS NRO_DOCUMENTO
         ,UPPER(TRIM(tblDocumento.Complemento)) AS COMPLEMENTO      
         ,SUBSTR(UPPER(TRIM(NVL(LUGNAC.sdescript,'BOLIVIA'))),1,199) AS LUGAR_NAC_ASEGURADO                
-        ,rolAse.dbirthdate As FECHA_NACIMIENTO                     
+        ,TO_CHAR(rolAse.dbirthdate , 'DD-MM-YYYY') As FECHA_NACIMIENTO                     
         ,trunc(months_between(sysdate,rolAse.dbirthdate)/12) EDAD       
         ,aseg.sclient AS COD_ASEGURADO
         ,DBMS_LOB.SUBSTR(EXCL.Exclusiones, 950, 1) EXCLUSIONES_PARTICULARES
@@ -348,6 +356,7 @@ WITH cteCoberturas AS (
                                                 AND Cert.NProduct=excl.NProduct AND Cert.NPolicy = excl.NPolicy
                                                 AND aseg.sclient=excl.sclient                                             
     LEFT JOIN TABLE181 ECert On cert.SSTATUSVA = ECert.SSTATUSVA
+    LEFT JOIN cteAmpliacionVigencia CAmp ON vpol.NBRANCH= CAmp.NBRANCH AND vpol.NProduct = CAmp.NProduct AND vpol.NPOLICY=CAmp.NPolicy  
     
     WHERE vPol.SCERTYPE = '2' 
     AND vpol.codestadopoliza NOT IN (2,3,6,7,8) -- SE QUITAN LAS POLIZAS QUE NO ESTAN ACTIVAS

@@ -1,4 +1,5 @@
-﻿WITH cteEmpresa AS (
+﻿
+WITH cteEmpresa AS (
         SELECT NVL(TRIM(CD.SCLINUMDOCU), '1028483024') AS NIT_EMPRESA
           ,TRIM(REAGENERALPKG.REANAMECLI(CD.SCLIENT)) AS NOMBRE_EMPRESA
           , 1 Id
@@ -249,13 +250,13 @@
 ---cteFacturas_EnRelacion, se agrupan las facturas que participan en la relacion
 ,cteFacturas_EnRelacion as (
    SELECT CF1.Nbordereaux
-        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum,'')), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) As FacturasEnRelacion
+        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum,PO_AUX.nreceipt)), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) As FacturasEnRelacion
         , MAX(DECODE(NVL(F1.NBILLNUM,0),0,'Recibo', DECODE(NVL(tblFA.NBILLNUM,0),0,'Factura','Factura Anticipada'))) As TipoDocumento 
         , MAX(NVL(tblCambioDeFactura.FechaCambioFact,NULL)) As FechaFacturaAnterior
         , MAX(NVL(tblCambioDeFactura.NroFactAnterior,NULL)) As NroFacturaAnterior
     FROM COLFORMREF CF1
     INNER JOIN PREMIUM_MO PO_AUX  ON CF1.Nbordereaux = PO_AUX.Nbordereaux
-    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux
+    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux AND F1.Nbillstat not in (2)
     OUTER APPLY (
          SELECT PO_AUX2.NBILLNUM 
          FROM PREMIUM_MO  PO_AUX2 
@@ -273,7 +274,8 @@
         AND B1.Nnullcode= 11 -- Cambio de Factura
     )tblCambioDeFactura
     WHERE NVL(PO_AUX.NNULLCODE,0)=0 
-    AND F1.Nbillstat not in (2) -- Anulado 
+    --AND F1.Nbillstat not in (2) -- Anulado 
+    --and CF1.Nbordereaux=226
     GROUP BY CF1.Nbordereaux
     
     UNION ALL
@@ -336,7 +338,7 @@
                          AND PO.NDIGIT= P.NDIGIT
                          AND PO.NPAYNUMBE= P.NPAYNUMBE
     INNER JOIN cteRecibos_EnRelacion cteRRel on CF3.Nbordereaux = cteRRel.Nbordereaux
-    INNER JOIN cteFacturas_EnRelacion cteFRel on CF3.Nbordereaux = cteFRel.Nbordereaux
+    LEFT JOIN cteFacturas_EnRelacion cteFRel on CF3.Nbordereaux = cteFRel.Nbordereaux
     INNER JOIN TABLE19 EstRec ON P.nstatus_pre= EstRec.nstatus_pre
     INNER JOIN TABLE24 TCuo ON P.NTRATYPEI= TCuo.NTRATYPEI                     
     --LEFT JOIN BILLS fact ON CF3.NBordereaux = fact.NBordereaux                             
@@ -563,70 +565,71 @@ where NVL(cref.NNULLCODE,0)=0
     
 )
 SELECT 
-              511 KEY--NS_INSCONTROLINGRESO511.SKEY SKEY
-            , VPOL.SCertype
-            , VPOL.nbranch
-            , VPOL.nproduct
-            , TO_CHAR(VPOL.npolicy) AS NPOLICY
-            , Vpol.FrecuenciaPago
-            , TO_CHAR(cteRCob.RecibosEnRelacion) AS NRECEIPT
-            , cteEmpresa.NOMBRE_EMPRESA As NombreEmpresa
-            , TO_CHAR(cteEmpresa.NIT_EMPRESA) AS NitEmpresa
-            , VPOL.LineaNegocio
-            , VPOL.CanalVenta
-            , VPOL.Ramo
-            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto as Producto
-            , TRIM(VPOL.CanalCobroAsignado) AS CanalCobroAsignado
-            , VPOL.CodRegionalPoliza
-            , VPOL.RegionalPoliza
-            , suc.noffice As CodRegionalTransaccion
-            , TRIM(suc.sdescript) as RegionalCobro
-            , cteRCob.NCASHNUM CodCajero
-            , cteRCob.Cajero
-            , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DCollect AS FechaCobro
-            , vpol.contratante Cliente
-            , cteRCob.TipoCuota
-            , TO_CHAR(cteRCob.NroCuota) AS NroCuota
-            , cteRCob.FechaVencimiento
-            , cteRCob.TipoDocumento
-            , TO_CHAR(cteRCob.FacturasEnRelacion) As NroFactura
-            , cteRCob.FormaCobroRealizado 
-            , TO_CHAR(CREF.NBordereaux) As NroRelacionCompensacion
-            , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCob.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCob.NroCuota)) As Concepto
-            , Vpol.FrecuenciaPago as Perioricidad
-            , cteRCob.Banco 
-            , cteRCob.NroCuenta
-            , cteRCob.CodigoTransaccion
-            , cteRCob.NroCheque
-            , cteRCob.FechaDeposito
-            , cteRCob.AdministradoraTarjeta
-            , cteRCob.NroTarjeta
-            , VPOL.MonedaPoliza
-            , ROUND(cteRCob.ImporteCuota,2) As ImportePrimaPorCobrarMO
-            , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As ImportePrimaPorCobrarML
-            , ROUND(cteRCob.ImporteRecibidoMO,2)  AS  ImporteRecibidoMO
-            , ROUND(cteRCob.ImporteRecibidoML ,2)   AS  ImporteRecibidoML  
-            , ROUND(cteRCob.SaldoFavorMO ,2)   AS  SaldoFavorMO           
-            , ROUND(cteRCob.SaldoFavorMO ,2) * NVL(tblTipoCambio.TC,0)  AS SaldoFavorML       
-            , 0 As RegularizacionSaldoMO
-            , 0 As RegularizacionSaldoML
-            , tblTipoCambio.TC as TipoCambio
-            , VPol.CodTipoIntermediario
-            , VPOL.TipoIntermediario As TipoIntermediario
-            , VPol.CodIntermediario
-            , VPOL.Intermediario As Intermediario
-            , cteRCob.Ntype
-            , cteRCob.CodMonedaTransaccion
-            , cteRCob.MonedaTransaccion
-            , cteRCob.EstadoRecibo
-            , CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.FechaFacturaAnterior ELSE NULL END As FechaFacturaRecibo
-            , TO_CHAR(CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.NroFacturaAnterior ELSE NULL END) AS NroFacturaAnterior
-            , '' AS MonedaOriginalAnterior
-            , TO_CHAR(CREF.NCERTIF) As NroCertificado
-            , VPOL.TipoFacturaColectivo
-            , VPOL.TipoDistribucion
-            , cteRCob.ImporteTotalRecibido as ImporteTotalRecibido
+              511 SKEY
+            , cteEmpresa.NOMBRE_EMPRESA As NOMBRE_COMPANIA
+            , TO_CHAR(cteEmpresa.NIT_EMPRESA) AS NIT_COMPANIA
+            , VPOL.LineaNegocio as LINEA_NEGOCIO
+            , VPOL.CanalVenta as CANAL_VENTA
+            , VPOL.Ramo  as RAMO
+            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto as PRODUCTO
+            , TRIM(VPOL.CanalCobroAsignado) AS CANAL_COBRO_ASIGNADO 
+            , VPOL.RegionalPoliza  as REGIONAL_ORIGEN
+            , TRIM(suc.sdescript) as REGIONAL_COBRO
+            , cteRCob.Cajero as CAJERO
+            , cteRCob.CanalCobroRealizado as CANAL_COBRO
+            , TO_CHAR(CREF.DCollect, 'DD-MM-YYYY') AS FECHA_COBRO
+            , VPOL.TipoFacturaColectivo as TIPO_FACTURA_COLECTIVO
+            , VPOL.TipoDistribucion as TIPO_DISTRIBUCION
+            , vpol.contratante CLIENTE
+            , TO_CHAR(VPOL.npolicy) AS NRO_POLIZA
+            , TO_CHAR(CREF.NCERTIF) As NRO_CERTIFICADO
+            , cteRCob.TipoCuota as TIPO_CUOTA
+            , TO_CHAR(cteRCob.NroCuota) AS NRO_CUOTA
+            , TO_CHAR(cteRCob.RecibosEnRelacion) AS COD_RECIBO 
+            , TO_CHAR(cteRCob.FechaVencimiento, 'DD-MM-YYYY') as FECHA_VENCIMIENTO
+            , cteRCob.TipoDocumento as TIPO_DOCUMENTO
+            , TO_CHAR(cteRCob.FacturasEnRelacion) As NRO_FACTURA_RECIBO
+            , cteRCob.FormaCobroRealizado  as FORMA_COBRO
+            , TO_CHAR(CREF.NBordereaux) As NRO_RELACION
+            , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCob.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCob.NroCuota)) As CONCEPTO
+            , Vpol.FrecuenciaPago as PERIODICIDAD
+            , cteRCob.Banco  as BANCO
+            , cteRCob.NroCuenta  as NRO_CUENTA
+            , cteRCob.CodigoTransaccion as COD_TRANSACCION
+            , cteRCob.NroCheque as NRO_CHEQUE
+            , cteRCob.FechaDeposito as FECHA_DEPOSITO
+            , cteRCob.AdministradoraTarjeta as ADMINISTRADORA_TARJETA
+            , cteRCob.NroTarjeta as NRO_TARJETA
+            , VPOL.MonedaPoliza as MONEDA_POLIZA
+            , ROUND(cteRCob.ImporteCuota,2) As IMPORTE_POR_COBRAR_MO
+            , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As IMPORTE_POR_COBRAR_LO
+            , ROUND(cteRCob.ImporteRecibidoMO,2)  AS  IMPORTE_RECIBIDO_MO
+            , ROUND(cteRCob.ImporteRecibidoML ,2)   AS  IMPORTE_RECIBIDO_LO  
+            , ROUND(cteRCob.SaldoFavorMO ,2)   AS  SALDO_FAVOR_MO           
+            , ROUND(cteRCob.SaldoFavorMO ,2) * NVL(tblTipoCambio.TC,0)  AS SALDO_FAVOR_LO       
+            , 0 As REGULARIZACION_SALDO_MO
+            , 0 As REGULARIZACION_SALDO_LO
+            , tblTipoCambio.TC as TIPO_CAMBIO
+            , VPOL.TipoIntermediario As TIPO_INTERMEDIARIO
+            , VPOL.Intermediario As INTERMEDIARIO
+            , cteRCob.MonedaTransaccion as MONEDA_TRANSACCION
+            , cteRCob.EstadoRecibo as ESTADO_RECIBO
+            , CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.FechaFacturaAnterior ELSE NULL END As FECHA_FACTURA_RECIBO
+            , TO_CHAR(CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.NroFacturaAnterior ELSE NULL END) AS NRO_FACTURA_ANTERIOR
+            , '' AS MONEDA_TRANSACCION_ANTERIOR
+                        
+--            , VPOL.SCertype
+--            , VPOL.nbranch
+--            , VPOL.nproduct           
+--            , Vpol.FrecuenciaPago                                             
+--            , VPOL.CodRegionalPoliza           
+--            , suc.noffice As CodRegionalTransaccion           
+--            , cteRCob.NCASHNUM CodCajero           
+--            , VPol.CodTipoIntermediario           
+--            , VPol.CodIntermediario            
+--            , cteRCob.Ntype
+--            , cteRCob.CodMonedaTransaccion
+--            , cteRCob.ImporteTotalRecibido as ImporteTotalRecibido
         FROM COLFORMREF CREF                      
         INNER JOIN cteDatosReciboAgrupado cteRCob ON CREF.NBordereaux = cteRCob.NBordereaux 
         INNER JOIN NS_View_DatosGeneralesPoliza VPOL ON 
@@ -639,78 +642,78 @@ SELECT
             FROM dual
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
-        WHERE NVL(CREF.nnullcode,0)=0  
-        AND CREF.DCollect between TO_DATE('01/05/2026','DD-MM-YYYY') AND TO_DATE('31/05/2026','DD-MM-YYYY')             		                                     		             
-        --parametros>                  
-        
+        WHERE NVL(CREF.nnullcode,0)=0               		                                     		             
+        --parametros>                  		
+        AND  CREF.DCollect BETWEEN TO_DATE('01/06/2026' , 'DD-MM-YYYY') AND TO_DATE('30/06/2026' , 'DD-MM-YYYY')
     ---// PAGOS ADICIONALES // -----
     UNION ALL
     
         SELECT 
-             511 KEY-- NS_INSCONTROLINGRESO511.SKEY SKEY
-            , VPOL.SCertype
-            , VPOL.nbranch
-            , VPOL.nproduct
-            , TO_CHAR(VPOL.npolicy) AS NPOLICY
-            , Vpol.FrecuenciaPago
-            , TO_CHAR(cteRCob.RecibosEnRelacion) AS NRECEIPT
-            , cteEmpresa.NOMBRE_EMPRESA As NombreEmpresa
-            , TO_CHAR(cteEmpresa.NIT_EMPRESA) AS NitEmpresa
-            , VPOL.LineaNegocio
-            , VPOL.CanalVenta
-            , VPOL.Ramo
-            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto as Producto
-            , TRIM(VPOL.CanalCobroAsignado) AS CanalCobroAsignado
-            , VPOL.CodRegionalPoliza
-            , VPOL.RegionalPoliza
-            , suc.noffice As CodRegionalTransaccion
-            , TRIM(suc.sdescript) as RegionalCobro
-            , cteRCob.NCASHNUM CodCajero
-            , cteRCob.Cajero
-            , cteRCob.CanalCobroRealizado as CanalCobroRealizado
-            , CREF.DCollect AS FechaCobro
-            , vpol.contratante Cliente
-            , cteRCob.TipoCuota
-            , TO_CHAR(cteRCob.NroCuota) AS NroCuota
-            , cteRCob.FechaVencimiento
-            , cteRCob.TipoDocumento
-            , TO_CHAR(cteRCob.FacturasEnRelacion) As NroFactura
-            , cteRCob.FormaCobroRealizado 
-            , TO_CHAR(CREF.NBordereaux) As NroRelacionCompensacion
-            , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCob.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCob.NroCuota)) As Concepto
-            , Vpol.FrecuenciaPago as Perioricidad
-            , cteRCob.Banco 
-            , cteRCob.NroCuenta
-            , cteRCob.CodigoTransaccion
-            , cteRCob.NroCheque
-            , cteRCob.FechaDeposito
-            , cteRCob.AdministradoraTarjeta
-            , cteRCob.NroTarjeta
-            , VPOL.MonedaPoliza
-            , ROUND(cteRCob.ImporteCuota,2) As ImportePrimaPorCobrarMO
-            , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As ImportePrimaPorCobrarML
-            , ROUND(cteRCob.ImporteRecibidoMO,2)  AS  ImporteRecibidoMO
-            , ROUND(cteRCob.ImporteRecibidoML ,2)   AS  ImporteRecibidoML  
-            , ROUND(cteRCob.SaldoFavorMO ,2)   AS  SaldoFavorMO           
-            , ROUND(cteRCob.SaldoFavorMO ,2) * NVL(tblTipoCambio.TC,0)  AS SaldoFavorML       
-            , 0 As RegularizacionSaldoMO
-            , 0 As RegularizacionSaldoML
-            , tblTipoCambio.TC as TipoCambio
-            , VPol.CodTipoIntermediario
-            , VPOL.TipoIntermediario As TipoIntermediario
-            , VPol.CodIntermediario
-            , VPOL.Intermediario As Intermediario
-            , cteRCob.Ntype
-            , cteRCob.CodMonedaTransaccion
-            , cteRCob.MonedaTransaccion
-            , cteRCob.EstadoRecibo
-            , CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.FechaFacturaAnterior ELSE NULL END As FechaFacturaRecibo
-            , TO_CHAR(CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.NroFacturaAnterior ELSE NULL END) AS NroFacturaAnterior
-            , '' AS MonedaOriginalAnterior
-            , TO_CHAR(CREF.NCERTIF) As NroCertificado
-            , VPOL.TipoFacturaColectivo
-            , VPOL.TipoDistribucion
-            , cteRCob.ImporteTotalRecibido as ImporteTotalRecibido
+               511 SKEY
+            , cteEmpresa.NOMBRE_EMPRESA As NOMBRE_COMPANIA
+            , TO_CHAR(cteEmpresa.NIT_EMPRESA) AS NIT_COMPANIA
+            , VPOL.LineaNegocio as LINEA_NEGOCIO
+            , VPOL.CanalVenta as CANAL_VENTA
+            , VPOL.Ramo  as RAMO
+            , TO_CHAR(VPOL.nproduct) || '-' ||VPOL.Producto as PRODUCTO
+            , TRIM(VPOL.CanalCobroAsignado) AS CANAL_COBRO_ASIGNADO 
+            , VPOL.RegionalPoliza  as REGIONAL_ORIGEN
+            , TRIM(suc.sdescript) as REGIONAL_COBRO
+            , cteRCob.Cajero as CAJERO
+            , cteRCob.CanalCobroRealizado as CANAL_COBRO
+            , TO_CHAR(CREF.DCollect, 'DD-MM-YYYY') AS FECHA_COBRO
+            , VPOL.TipoFacturaColectivo as TIPO_FACTURA_COLECTIVO
+            , VPOL.TipoDistribucion as TIPO_DISTRIBUCION
+            , vpol.contratante CLIENTE
+            , TO_CHAR(VPOL.npolicy) AS NRO_POLIZA
+            , TO_CHAR(CREF.NCERTIF) As NRO_CERTIFICADO
+            , cteRCob.TipoCuota as TIPO_CUOTA
+            , TO_CHAR(cteRCob.NroCuota) AS NRO_CUOTA
+            , TO_CHAR(cteRCob.RecibosEnRelacion) AS COD_RECIBO 
+            , TO_CHAR(cteRCob.FechaVencimiento, 'DD-MM-YYYY') as FECHA_VENCIMIENTO
+            , cteRCob.TipoDocumento as TIPO_DOCUMENTO
+            , TO_CHAR(cteRCob.FacturasEnRelacion) As NRO_FACTURA_RECIBO
+            , cteRCob.FormaCobroRealizado  as FORMA_COBRO
+            , TO_CHAR(CREF.NBordereaux) As NRO_RELACION
+            , 'Producto:'|| VPOL.Producto ||' | Nro. Poliza:' || To_char(TRIM(VPOL.NroPoliza))|| ' | Tipo Cuota:' || to_char(cteRCob.TipoCuota)  || ' | Nro. Cuota: ' || To_char(TRIM(cteRCob.NroCuota)) As CONCEPTO
+            , Vpol.FrecuenciaPago as PERIODICIDAD
+            , cteRCob.Banco  as BANCO
+            , cteRCob.NroCuenta  as NRO_CUENTA
+            , cteRCob.CodigoTransaccion as COD_TRANSACCION
+            , cteRCob.NroCheque as NRO_CHEQUE
+            , cteRCob.FechaDeposito as FECHA_DEPOSITO
+            , cteRCob.AdministradoraTarjeta as ADMINISTRADORA_TARJETA
+            , cteRCob.NroTarjeta as NRO_TARJETA
+            , VPOL.MonedaPoliza as MONEDA_POLIZA
+            , ROUND(cteRCob.ImporteCuota,2) As IMPORTE_POR_COBRAR_MO
+            , ROUND(cteRCob.ImporteCuota  * NVL(tblTipoCambio.TC,0),2) As IMPORTE_POR_COBRAR_LO
+            , ROUND(cteRCob.ImporteRecibidoMO,2)  AS  IMPORTE_RECIBIDO_MO
+            , ROUND(cteRCob.ImporteRecibidoML ,2)   AS  IMPORTE_RECIBIDO_LO  
+            , ROUND(cteRCob.SaldoFavorMO ,2)   AS  SALDO_FAVOR_MO           
+            , ROUND(cteRCob.SaldoFavorMO ,2) * NVL(tblTipoCambio.TC,0)  AS SALDO_FAVOR_LO       
+            , 0 As REGULARIZACION_SALDO_MO
+            , 0 As REGULARIZACION_SALDO_LO
+            , tblTipoCambio.TC as TIPO_CAMBIO
+            , VPOL.TipoIntermediario As TIPO_INTERMEDIARIO
+            , VPOL.Intermediario As INTERMEDIARIO
+            , cteRCob.MonedaTransaccion as MONEDA_TRANSACCION
+            , cteRCob.EstadoRecibo as ESTADO_RECIBO
+            , CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.FechaFacturaAnterior ELSE NULL END As FECHA_FACTURA_RECIBO
+            , TO_CHAR(CASE WHEN NVL(cteRCob.NroFacturaAnterior,0) <> 0 THEN cteRCob.NroFacturaAnterior ELSE NULL END) AS NRO_FACTURA_ANTERIOR
+            , '' AS MONEDA_TRANSACCION_ANTERIOR
+                        
+--            , VPOL.SCertype
+--            , VPOL.nbranch
+--            , VPOL.nproduct           
+--            , Vpol.FrecuenciaPago                                             
+--            , VPOL.CodRegionalPoliza           
+--            , suc.noffice As CodRegionalTransaccion           
+--            , cteRCob.NCASHNUM CodCajero           
+--            , VPol.CodTipoIntermediario           
+--            , VPol.CodIntermediario            
+--            , cteRCob.Ntype
+--            , cteRCob.CodMonedaTransaccion
+--            , cteRCob.ImporteTotalRecibido as ImporteTotalRecibido
         FROM COLFORMREF CREF                              
         INNER JOIN cteDatosReciboAgrupado cteRCob ON CREF.NBordereaux = cteRCob.NBordereaux 
         INNER JOIN RELCONCEPTS RCon on   CREF.NBordereaux = RCon.NBordereaux
@@ -722,6 +725,5 @@ SELECT
         ) tblTipoCambio
         INNER JOIN cteEmpresa ON cteEmpresa.Id=1
         WHERE NVL(CREF.nnullcode,0)=0    
-        AND CREF.DCollect between TO_DATE('01/05/2026','DD-MM-YYYY') AND TO_DATE('31/05/2026','DD-MM-YYYY') 
         --parametros>                  
-        
+        AND  CREF.DCollect BETWEEN TO_DATE('01/06/2026' , 'DD-MM-YYYY') AND TO_DATE('30/06/2026','DD-MM-YYYY')			
