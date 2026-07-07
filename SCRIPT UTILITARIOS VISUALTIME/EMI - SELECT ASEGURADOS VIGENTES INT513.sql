@@ -204,7 +204,7 @@ WITH cteCoberturas AS (
         ROW_NUMBER() OVER(ORDER BY vpol.CodRegionalPoliza,vpol.NPOLICY, cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADO
         ,ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADOXCUENTA
         ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.producto), '[.,-]', '')),1,199) PRODUCTO
-        ,SUBSTR(UPPER(SUBSTR(TRIM(VPOL.nproduct),1,100)) || ' ' || UPPER(SUBSTR(TRIM(vpol.ProductoAbreviado),1,90)),1,199) AS DESCRIPCION_ABREVIADA
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(VPOL.nproduct, '[.,]'))) || ' ' || UPPER(TRIM(REGEXP_REPLACE(vpol.ProductoAbreviado, '[.,]'))), 1, 200) AS DESCRIPCION_ABREVIADA
         ,SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPO_POLIZA
         ,TO_CHAR(vpol.fechaemision , 'DD-MM-YYYY') AS FECHA_EMISION_POLIZA
         ,SUBSTR(UPPER(TRIM(vpol.RegionalPoliza)),1,199) AS REGIONALPOLIZA

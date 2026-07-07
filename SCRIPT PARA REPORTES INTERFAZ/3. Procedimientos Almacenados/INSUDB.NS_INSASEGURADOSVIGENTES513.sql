@@ -324,8 +324,8 @@ INSERT INTO TIMETMP.TMP_INT513
         ,ROW_NUMBER() OVER(ORDER BY vpol.CodRegionalPoliza,vpol.NPOLICY, cert.NCERTIF,rolAse.NCOVERPOS) AS NroTotalAsegurado
         ,ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NroAseguradoPorCuenta
         ,SUBSTR(UPPER(VPOL.nproduct),1,20) NPRODUCT
-        ,SUBSTR(UPPER(TRIM(vpol.producto)),1,199) PRODUCTO
-        ,SUBSTR(UPPER(SUBSTR(TRIM(VPOL.nproduct),1,100)) || ' - ' || UPPER(SUBSTR(TRIM(vpol.ProductoAbreviado),1,90)),1,199) PRODUCTOABREVIADO
+        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.producto), '[.,-]', '')),1,199)  PRODUCTO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(VPOL.nproduct, '[.,-]'))) || ' ' || UPPER(TRIM(REGEXP_REPLACE(vpol.ProductoAbreviado, '[.,-]'))), 1, 200) PRODUCTOABREVIADO
         ,NULL AS Plan
         ,SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPOPOLIZA
         ,SUBSTR(UPPER(TRIM(vpol.TipoFacturaColectivo)),1,199) AS TIPOFACTURACOLECTIVO
@@ -353,17 +353,17 @@ INSERT INTO TIMETMP.TMP_INT513
         ,CASE WHEN vpol.CodMonedaPoliza = 2 THEN nvl(cd.NDEDUCIBLE,0) ELSE NULL END NDEDUCIBLESUS
         ,SUBSTR(UPPER(TRIM(ambgeo.sdescript)),1,199) AS AMBITOGEORGRAFICO
         ,CASE WHEN vpol.NPRODUCT IN (2,3) THEN 'SEGUNDA RED' ELSE 'PRIMERA RED' END As SISTEMAATENCION
-        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(vpol.contratante, '[.,]'))), 1, 499) CONTRATANTE
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(vpol.contratante, '[.,-]'))), 1, 499) CONTRATANTE
         ,cert.ncertif AS NroCertificado
         ,aseg.sclient CodigoAsegurado
-        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.sfirstname, '[.,]'))), 1, 800) AS NombreAsegurado
-        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.slastname || ' ' || aseg.slastname2, '[.,]'))), 1, 840)As ApellidosAsegurado
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.sfirstname, '[.,-]'))), 1, 800) AS NombreAsegurado
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.slastname || ' ' || aseg.slastname2, '[.,-]'))), 1, 840)As ApellidosAsegurado
         ,(CASE WHEN TO_CHAR( NVL(vpol.finvigenciapoliza, SYSDATE), 'YYYYMMDD') < TO_CHAR(SYSDATE , 'YYYYMMDD') 
             THEN 'VENCIDA'
             ELSE    CASE WHEN rolAse.nstatusrol=1 
                              THEN 
                                     CASE WHEN rolAse.Dnulldate IS NULL 
-                                    THEN  CASE WHEN CAmp.NPolicy IS NULL  THEN  UPPER(TRIM(ease.sdescript)) ELSE   'VIGENTE CON AMPLIACION DE VIGENCIA '  END
+                                    THEN  CASE WHEN CAmp.NPolicy IS NULL  THEN  UPPER(TRIM(ease.sdescript)) ELSE   'VIGENTE CON AMPLIACION DE VIGENCIA'  END
                                     ELSE 'EXCLUIDO' END  
                            ELSE UPPER(TRIM(ease.sdescript)) END 
           END)   as EstadoAsegurado
@@ -376,7 +376,7 @@ INSERT INTO TIMETMP.TMP_INT513
                         WHEN 68  THEN DECODE(sexo.SSEXCLIEN,1, 'ABUELA', 'ABUELO')
                         ELSE UPPER(TRIM(crol.sdescript))
                         END Relacion      
-        ,SUBSTR(UPPER(TRIM(TPer.sdescript)),1,199) AS TIPOPERSONA
+        ,SUBSTR(UPPER(TRIM(TPer.sshort_des)),1,199) AS TIPOPERSONA
         ,SUBSTR(UPPER(TRIM(tblDocumento.tipoDocumentoCorto)),1,199) TIPODOCUMENTOCORTO
         ,tblDocumento.nrodocumento
         ,UPPER(TRIM(tblDocumento.Complemento)) COMPLEMENTO
@@ -406,10 +406,10 @@ INSERT INTO TIMETMP.TMP_INT513
 --        ELSE '' END),1,499) COASEGURO_ODONTOLOGICO
         , CASE WHEN NVL(UPPER(cd.TieneOdontologia),'NO') = 'NO' THEN NULL ELSE 'BS 70' END COASEGURO_ODONTOLOGICO
 
-        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(cd.clinicaodontologica), '[.,]', '')),1,499) CLINICAODONTOLOGICA
+        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(cd.clinicaodontologica), '[.,-]', '')),1,499) CLINICAODONTOLOGICA
         ,NVL(UPPER(cd.SeguroAlViajero),'NO') AS SeguroAlViajero
         ,CASE WHEN cd.EmergenciaMedicas IS NULL THEN 'NO' ELSE 'SI' END TIENEEMERGENCIAMEDICAS
-        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(NVL(cd.EmergenciaMedicas,'')), '[.,]', '')),1,499) EMERGENCIAMEDICAS
+        ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(NVL(cd.EmergenciaMedicas,'')), '[.,-]', '')),1,499) EMERGENCIAMEDICAS
         ,NVL(UPPER(cd.MuerteAccidental),'NO') AS MuerteAccidental
         ,NVL(UPPER(cd.Sepelio),'NO') AS Sepelio
         ,null as FechaFinCredencial
@@ -420,7 +420,7 @@ INSERT INTO TIMETMP.TMP_INT513
         ,'' As Observaciones
         ,CASE WHEN vpol.CodMonedaPoliza = 1 THEN 1 ELSE Tasa.TC_DOLAR END AS TIPO_CAMBIO
         ,UPPER(TRIM(ECert.sdescript)) As EstadoCertificado
-        ,SUBSTR(UPPER(TRIM(TP_CONT.sdescript)),1,199) AS TIPO_PERSONA
+        ,SUBSTR(UPPER(TRIM(TP_CONT.sshort_des)),1,199) AS TIPO_PERSONA
         ,SUBSTR(UPPER(TRIM(NVL(LUGNAC.sdescript,'BOLIVIA'))),1,199) AS LUGAR_NACIMIENTO
         
     FROM NS_View_DatosGeneralesPoliza vpol
