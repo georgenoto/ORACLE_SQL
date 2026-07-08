@@ -202,10 +202,14 @@ WITH cteCoberturas AS (
     SELECT
 
         ROW_NUMBER() OVER(ORDER BY vpol.CodRegionalPoliza,vpol.NPOLICY, cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADO
-        ,ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADOXCUENTA
+        ,ROW_NUMBER() OVER(PARTITION BY vpol.NPOLICY ORDER BY cert.NCERTIF,rolAse.NCOVERPOS) AS NRO_TOTAL_ASEGURADOXCUENTA        
         ,SUBSTR(UPPER(REGEXP_REPLACE(TRIM(vpol.producto), '[.,-]', '')),1,199) PRODUCTO
         ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(VPOL.nproduct, '[.,]'))) || ' ' || UPPER(TRIM(REGEXP_REPLACE(vpol.ProductoAbreviado, '[.,]'))), 1, 200) AS DESCRIPCION_ABREVIADA
-        ,SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPO_POLIZA
+        --,SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) As TIPO_POLIZA
+        ,CASE WHEN UPPER(TRIM(vpol.tipopoliza))= 'INDIVIDUAL'   
+          THEN    CASE  WHEN COUNT(DISTINCT rolAse.NCOVERPOS) OVER(PARTITION BY vpol.NPOLICY)> 1 THEN 'FAMILIAR' ELSE SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99) END     
+          ELSE SUBSTR(UPPER(TRIM(vpol.tipopoliza)),1,99)
+          END AS TIPO_POLIZA
         ,TO_CHAR(vpol.fechaemision , 'DD-MM-YYYY') AS FECHA_EMISION_POLIZA
         ,SUBSTR(UPPER(TRIM(vpol.RegionalPoliza)),1,199) AS REGIONALPOLIZA
         ,VPOL.npolicy AS NRO_POLIZA
@@ -236,8 +240,10 @@ WITH cteCoberturas AS (
                                     ELSE 'EXCLUIDO' END  
                            ELSE UPPER(TRIM(ease.sdescript)) END 
           END)   as ESTADO_ASEGURADO
-        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.sfirstname, '[.,]'))), 1, 800) AS NOMBRE_ASEGURADO
-        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.slastname || ' ' || aseg.slastname2, '[.,]'))), 1, 840) AS APELLIDOS_ASEGURADO      
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.SFIRSTNAME, '[.,-]'))), 1, 800) AS NOMBRE_ASEGURADO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.SLASTNAME, '[.,-]'))), 1, 840)As APELLIDO_PATERNO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.SLASTNAME2, '[.,-]'))), 1, 840)As APELLIDO_MATERNO
+        ,SUBSTR(UPPER(TRIM(REGEXP_REPLACE(aseg.SMARRIEDSURNAME, '[.,-]'))), 1, 840)As APELLIDO_CASADA     
         ,UPPER(TRIM(sexo.sdescript)) As GENERO
         ,CASE crol.nrole WHEN 22  THEN DECODE(sexo.SSEXCLIEN,1, 'HIJA', 'HIJO')
                         WHEN 24  THEN DECODE(sexo.SSEXCLIEN,1, 'HERMANA', 'HERMANO')
@@ -249,8 +255,11 @@ WITH cteCoberturas AS (
                         END RELACION
         ,SUBSTR(UPPER(TRIM(tblDocumento.tipoDocumentoCorto)),1,199) TIPO_DOCUMENTO
         ,tblDocumento.nrodocumento AS NRO_DOCUMENTO
-        ,UPPER(TRIM(tblDocumento.Complemento)) AS COMPLEMENTO      
-        ,SUBSTR(UPPER(TRIM(NVL(LUGNAC.sdescript,'BOLIVIA'))),1,199) AS LUGAR_NAC_ASEGURADO                
+        ,UPPER(TRIM(tblDocumento.Complemento)) AS COMPLEMENTO
+        ,tblDocumento.codTipoDocumento   
+        ,CASE WHEN (tblDocumento.codTipoDocumento = 4 AND aseg.NBIRTHCOUNTRY = 591) THEN ''
+                ELSE SUBSTR(UPPER(TRIM(NVL(LUGNAC.sdescript, 'BOLIVIA'))), 1, 199)
+         END AS LUGAR_NAC_ASEGURADO              
         ,TO_CHAR(rolAse.dbirthdate , 'DD-MM-YYYY') As FECHA_NACIMIENTO                     
         ,trunc(months_between(sysdate,rolAse.dbirthdate)/12) EDAD       
         ,aseg.sclient AS COD_ASEGURADO
@@ -363,4 +372,3 @@ WITH cteCoberturas AS (
     AND CERT.SSTATUSVA NOT IN (2,3,6,7,8) -- SE QUITAR LOS CERTIFICADOS QUE NO ESTAN ACTIVOS 
     AND vPol.FechaEmision <= SYSDATE
     AND TO_CHAR(SYSDATE , 'YYYYMMDD') <= TO_CHAR(vpol.FinVigenciaPoliza, 'YYYYMMDD')
-    
