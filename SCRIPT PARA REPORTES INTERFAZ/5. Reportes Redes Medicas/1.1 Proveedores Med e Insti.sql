@@ -1,15 +1,15 @@
 WITH cteDocCliente AS (
-        SELECT
-            cliDoc.SCLIENT,
-            cliDoc.ntypclientdoc AS CODTIPODOCUMENTO,
-            cliDoc.sclinumdocu AS NRODOCUMENTO,
-            tdoc.sshort_des AS TIPODOCUMENTO,
-            cliDoc.sidcompl AS COMPLEMENTO,
-            ROW_NUMBER() OVER(PARTITION BY cliDoc.sclient ORDER BY clidoc.ntypclientdoc) as rn
-        FROM CLIDOCUMENTS cliDoc
-        INNER JOIN FORMATVALUES tdoc ON cliDoc.ntypclientdoc = tdoc.ntypclientdoc
-        WHERE tdoc.NCLASSTYPDOC=2
-    )
+    SELECT
+        cliDoc.SCLIENT,
+        cliDoc.ntypclientdoc AS CODTIPODOCUMENTO,
+        cliDoc.sclinumdocu AS NRODOCUMENTO,
+        tdoc.sshort_des AS TIPODOCUMENTO,
+        cliDoc.sidcompl AS COMPLEMENTO,
+        ROW_NUMBER() OVER(PARTITION BY cliDoc.sclient ORDER BY clidoc.ntypclientdoc) as rn
+    FROM CLIDOCUMENTS cliDoc
+    INNER JOIN FORMATVALUES tdoc ON cliDoc.ntypclientdoc = tdoc.ntypclientdoc
+    WHERE tdoc.NCLASSTYPDOC=2
+)
 SELECT
    TMED.NIDMEDICALFEE
   ,TRIM(TMED.SDESCRIPT) AS ID_ARANCEL

@@ -6,19 +6,12 @@ WHERE owner = 'INSUDB'       -- o el schema que necesites
   AND num_rows > 0
 ORDER BY table_name;
 --############### SELECT BUSCAR COLUMNAS EN TABLAS ###############
-SELECT 
-    owner AS esquema,
-    table_name AS tabla, 
-    column_name AS columna, 
-    data_type AS tipo_dato
-FROM 
-    all_tab_cols
-WHERE 
-    owner = 'INSUDB'
+SELECT owner AS esquema, table_name AS tabla, 
+       column_name AS columna, data_type AS tipo_dato
+FROM  all_tab_cols
+WHERE owner = 'INSUDB'
     AND column_name = 'NAMOUNT_VAT'
-ORDER BY 
-    owner, 
-    table_name;
+ORDER BY owner, table_name;
 --############### BUSCAR EN TODA LAS BASE DE DATOS ###############
     select * from SYS.ALL_SOURCE where upper(TEXT) like '%ODONTOLOGIA%%' 
 --############### LOG ERRORES POR PROCEDIMIENTO ALMACENADOS  ###############
