@@ -23,6 +23,14 @@ SELECT * FROM CLAIM_SETT_HIS WHERE NSETTLEMENT_NUM=25
 SELECT * FROM CLAIM_SETT_VOUCHER WHERE NSETTLEMENT_NUM=25
 SELECT * FROM CLAIM_VOUCHER_ORDER WHERE NSETTLEMENT_NUM=25      
 SELECT * FROM CLAIM_VOUCHER WHERE NCLAIM_VOUCHER=29
+-----  PAGO ---------------------
+select * from CHEQUES where nrequest_nu = 5 ---CLAIM_SETTLEMENT.nrequest_nu
+select * from COLFORMREF where NBORDEREAUX=3425 ---- RELCONCEPTS.NBORDEREAUX
+select * from BANK_ACC where NACC_BANK = 37  ------CHEQUES.NACC_BANK
+select * from RELCONCEPTS where nrequest_nu = 5   ---  CHEQUES.nrequest_nu NCONCEPT (305,308)
+select * from TABLE22 order by nconcept   ---RELCONCEPTS.nconcept
+select * from PAY_ORD_CONCEPTS where NCompany=1 and nconcept=6 ---CHEQUES.COmpany CHEQUES.NCOncept
+select * from TABLE293 where Nconcept=6
 -----  COBERTURAS ---------------------
 SELECT * FROM CL_COVER  WHERE NCLAIM= '260500136'
 SELECT * FROM CL_M_COVER  WHERE NCLAIM= '260500449'
