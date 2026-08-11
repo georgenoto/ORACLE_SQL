@@ -1,6 +1,5 @@
 
 WITH PolizaMoneda AS (
-    -- CTE para obtener la moneda de la póliza 
     SELECT
         SCERTYPE, NBRANCH, NPRODUCT, NPOLICY, ncurrency,
         ROW_NUMBER() OVER(PARTITION BY SCERTYPE, NBRANCH, NPRODUCT, NPOLICY ORDER BY DNULLDATE) as rn
@@ -8,13 +7,10 @@ WITH PolizaMoneda AS (
     WHERE dnulldate IS NULL
 ),
 TasaCambioDolar AS (
-    -- CTE para calcular el tipo de cambio para la moneda DÓLAR (2), reemplazando la función GETEXCHANGE.
-    -- Se une POLICY con EXCHANGE para encontrar la tasa más reciente para cada póliza.
     SELECT   p.SCERTYPE, p.NBRANCH, p.NPRODUCT, p.NPOLICY,
              COALESCE(e.NEXCHANGE, 0) as TC_DOLAR,
         ROW_NUMBER() OVER(PARTITION BY p.SCERTYPE, p.NBRANCH, p.NPRODUCT, p.NPOLICY ORDER BY e.DEFFECDATE DESC) as rn
     FROM
-        -- Se limita el escaneo de pólizas a las que se van a consultar.
         (SELECT SCERTYPE, NBRANCH, NPRODUCT, NPOLICY, DISSUEDAT FROM POLICY WHERE SCERTYPE = '2') p
     LEFT JOIN 
         EXCHANGE e ON e.NCURRENCY = 2 -- Moneda dólar.
@@ -35,11 +31,14 @@ cteIntermediario AS(
 ctePremium as (
 Select npolicy, dissuedat From premium Where  dnulldate is null and sstatusva in (4,5) and NTRATYPEI = 1 
 ),
-cteReemion as (
-select nproduct, npolicy, dcompdate, deffecdate, dledgerdat 
+cteReemision as (
+select nproduct, npolicy, dcompdate FechaReEmision
 from policy_his where ntype_hist=5
+),
+ctePrimerEmision as (
+select nproduct, npolicy, dcompdate FechaPrimerEmision ,ROW_NUMBER() OVER(PARTITION BY npolicy,ntype_hist ORDER BY npolicy DESC) as rn
+from policy_his where ntype_hist=1
 )
-
 SELECT
       TRIM(tcer.sdescript) AS TipoCertificado
     , pol.SCertype
@@ -52,7 +51,6 @@ SELECT
     , TRIM(Ram.Sdescript) AS Ramo
     , pol.NProduct AS CodProducto
     , TRIM(Prod.SDescript) AS Producto
-    -- El tipo de cambio (TC) depende de la moneda de la póliza.
     , CASE WHEN Moneda.ncodigint = 1 THEN 1 ELSE Tasa.TC_DOLAR END AS TC
     , lneg.sbrancht AS CodLineaNegocio
     , TRIM(LNeg.sdescript) AS LineaNegocio
@@ -67,7 +65,8 @@ SELECT
     , TRIM(moneda.sdescript) AS MonedaPoliza
     , pol.ncapital AS CapitalMO
     , pol.ncapital * (CASE WHEN Moneda.ncodigint = 1 THEN 1 ELSE Tasa.TC_DOLAR END) AS CapitalML
-    , Pol.DISSUEDAT AS FechaEmision
+    --, Pol.DISSUEDAT AS FechaEmision
+    , cteP.dissuedat FechaEmision
     , pol.DSTARTDATE AS InicioVigenciaPoliza
     , pol.DEXPIRDAT AS FinVigenciaPoliza
     , CanCobro.nway_pay AS IdCanalCobroAsignado
@@ -83,11 +82,11 @@ SELECT
     , cert.Nbill_day AS DiadeCobro
     , TPol.sdescript AS TipoPoliza
     , TRIM(Prod.sshort_des) AS ProductoAbreviado
-    , CASE pol.SPOLITYPE WHEN '1' THEN 'Póliza Individual' ELSE pol.SCOLINVOT || ' - ' || REAGENERALPKG.REACODIGINT('TABLE50', 'SCOLINVOT', pol.SCOLINVOT) END AS TipoFacturaColectivo
-    , TRIM(pol.STYPDIS_PAYPERCEN || ' - ' || REAGENERALPKG.REACODIGINT('TABLE9235', 'STYPDIS_PAYPERCEN', pol.STYPDIS_PAYPERCEN)) AS TipoDistribucion
-    , cteR.dcompdate, cteR.deffecdate, cteR.dledgerdat
-    , cteP.dissuedat FechaEmision_LibroProduccion
-    
+    , CASE pol.SPOLITYPE WHEN '1' THEN 'Póliza Individual' ELSE pol.SCOLINVOT || ' - ' || TRIM(T50.SSHORT_DES) END AS TipoFacturaColectivo
+    , TRIM(pol.STYPDIS_PAYPERCEN || ' - ' || TRIM(T9235.SDESCRIPT) ) AS TipoDistribucion
+    , ctePE.FechaPrimerEmision As Fecha_Primer_Emision
+    , CASE WHEN cteR.npolicy IS NULL THEN 'NO' ELSE 'SI' END Es_Reemitida
+    , cteR.FechaReEmision As Fecha_Re_Emision    
 FROM
     POLICY pol
     INNER JOIN Certificat cert ON pol.scertype = Cert.scertype AND pol.Nbranch = Cert.NBranch AND pol.NProduct = Cert.NProduct AND pol.NPolicy = Cert.NPolicy AND cert.ncertif = 0
@@ -103,21 +102,17 @@ FROM
     INNER JOIN TABLE181 EPol ON pol.Sstatus_Pol = Epol.Sstatusva
     INNER JOIN TABLE17 TPol ON pol.spolitype = TPol.ncodigint
     INNER JOIN ctePremium cteP on pol.npolicy = cteP.npolicy
-    LEFT JOIN cteReemion cteR on pol.nproduct = cteR.nproduct and pol.npolicy= cteR.npolicy
+    LEFT JOIN TABLE50 T50 ON pol.SCOLINVOT = T50.SCOLINVOT
+    LEFT JOIN TABLE9235 T9235 ON T9235.STYPDIS_PAYPERCEN = pol.STYPDIS_PAYPERCEN
+    LEFT JOIN cteReemision cteR on pol.nproduct = cteR.nproduct and pol.npolicy= cteR.npolicy
+    LEFT JOIN ctePrimerEmision ctePE on pol.nproduct = ctePE.nproduct and pol.npolicy= ctePE.npolicy and ctePE.rn=1    
     LEFT JOIN TABLE37 LNeg ON prod.sbrancht = lneg.sbrancht
-
-    -- Se une primero para obtener la moneda de la póliza.
     LEFT JOIN PolizaMoneda pm ON pol.SCERTYPE = pm.SCERTYPE AND pol.NBRANCH = pm.NBRANCH AND pol.NPRODUCT = pm.NPRODUCT AND pol.NPOLICY = pm.NPOLICY AND pm.rn = 1
     LEFT JOIN TABLE11 Moneda ON pm.ncurrency = Moneda.ncodigint
-
-    -- Se une al CTE que calcula el tipo de cambio para dólar. Se filtra por rn=1 para obtener solo la tasa más reciente.
-    -- Se usa LEFT JOIN para no descartar pólizas en moneda local (que no tendrán tasa en dólar).
     LEFT JOIN TasaCambioDolar Tasa ON pol.SCERTYPE = Tasa.SCERTYPE AND pol.NBRANCH = Tasa.NBRANCH AND pol.NPRODUCT = Tasa.NPRODUCT AND pol.NPOLICY = Tasa.NPOLICY AND Tasa.rn = 1
-
     LEFT JOIN cteIntermediario CTE_INTE ON POL.NBRANCH=  CTE_INTE.NBRANCH AND POL.NPRODUCT = CTE_INTE.NPRODUCT AND POL.NPOLICY= CTE_INTE.NPOLICY AND CTE_INTE.COD_TIPOINTERMEDIARIO NOT IN (5) AND CTE_INTE.RN=1
     LEFT JOIN cteIntermediario CTE_SUP ON POL.NBRANCH=  CTE_SUP.NBRANCH AND POL.NPRODUCT = CTE_SUP.NPRODUCT AND POL.NPOLICY= CTE_SUP.NPOLICY AND CTE_SUP.COD_TIPOINTERMEDIARIO  IN (5) AND CTE_SUP.RN=1
      
-
 WHERE
     pol.SCERTYPE = '2'
     --AND pol.npolicy = 75
