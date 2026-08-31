@@ -214,46 +214,51 @@ WITH cteEmpresa AS (
       AND CF2.STYPE NOT IN (2)
 ) 
 ,cteFacturas_EnRelacion AS (
-   SELECT CF1.Nbordereaux
-        , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum, PO_AUX.nreceipt)), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) AS FacturasEnRelacion
-        , MAX(DECODE(NVL(F1.NBILLNUM, 0), 0, 'Recibo', DECODE(NVL(tblFA.NBILLNUM, 0), 0, 'Factura', 'Factura Anticipada'))) AS TipoDocumento 
-        , MAX(NVL(tblCambioDeFactura.FechaCambioFact, NULL)) AS FechaFacturaAnterior
-        , MAX(NVL(tblCambioDeFactura.NroFactAnterior, NULL)) AS NroFacturaAnterior
-    FROM COLFORMREF CF1
-    INNER JOIN PREMIUM_MO PO_AUX ON CF1.Nbordereaux = PO_AUX.Nbordereaux
-    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux AND F1.Nbillstat NOT IN (2)
-    OUTER APPLY (
-         SELECT PO_AUX2.NBILLNUM 
-         FROM PREMIUM_MO PO_AUX2 
-         WHERE PO_AUX2.nreceipt = PO_AUX.nreceipt 
-           AND PO_AUX2.NBILLNUM = PO_AUX.NBILLNUM 
-           AND PO_AUX2.NTYPE IN (42)                   
-           AND NVL(PO_AUX2.NNULLCODE, 0) = 0
-    ) tblFA
-    OUTER APPLY (
-        SELECT B1.NBILLNUM AS NroFactAnterior
-              ,B1.dcompdate AS FechaCambioFact
-        FROM BILLS B1
-        WHERE B1.NBordereaux = CF1.Nbordereaux
-          AND B1.Nbillstat = 2  -- anulado
-          AND B1.Nnullcode = 11  -- Cambio de Factura
-    ) tblCambioDeFactura
-    WHERE NVL(PO_AUX.NNULLCODE, 0) = 0 
-    GROUP BY CF1.Nbordereaux
-    
-    UNION ALL
+   SELECT 
+    CF1.Nbordereaux
+  , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum, PO_AUX.nreceipt)), ', ' ON OVERFLOW TRUNCATE) 
+        WITHIN GROUP(ORDER BY F1.NBillnum) AS FacturasEnRelacion
+  , MAX(
+        CASE 
+            WHEN PO_AUX.Nbordereaux IS NOT NULL THEN
+                DECODE(NVL(F1.NBILLNUM, 0), 0, 'Recibo', 
+                       DECODE(NVL(tblFA.NBILLNUM, 0), 0, 'Factura', 'Factura Anticipada'))
+            ELSE
+                DECODE(NVL(F1.NBILLNUM, 0), 0, 'Recibo', 'Factura')
+        END
+    ) AS TipoDocumento 
+  , MAX(tblCambioDeFactura.FechaCambioFact) AS FechaFacturaAnterior
+  , MAX(tblCambioDeFactura.NroFactAnterior) AS NroFacturaAnterior
 
-    --- Facturas de pagos adicionales
-    SELECT CF1.Nbordereaux
-         , LISTAGG(DISTINCT TO_CHAR(NVL(F1.NBillnum, '')), ', ' ON OVERFLOW TRUNCATE) WITHIN GROUP(ORDER BY F1.NBillnum) AS FacturasEnRelacion
-         , MAX(DECODE(NVL(F1.NBILLNUM, 0), 0, 'Recibo', 'Factura')) AS TipoDocumento 
-         , NULL AS FechaFacturaAnterior
-         , NULL AS NroFacturaAnterior
-    FROM COLFORMREF CF1
-    INNER JOIN RELCONCEPTS CON ON CF1.NBORDEREAUX = CON.NBORDEREAUX
-    LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux
-    WHERE F1.Nbillstat NOT IN (2)
-    GROUP BY CF1.Nbordereaux
+FROM COLFORMREF CF1
+LEFT JOIN PREMIUM_MO PO_AUX ON CF1.Nbordereaux = PO_AUX.Nbordereaux 
+                               AND NVL(PO_AUX.NNULLCODE, 0) = 0
+LEFT JOIN RELCONCEPTS CON  ON CF1.NBORDEREAUX = CON.NBORDEREAUX
+LEFT JOIN BILLS F1 ON CF1.Nbordereaux = F1.Nbordereaux  
+                      AND F1.Nbillstat NOT IN (2)
+
+-- 3. Evaluaciones condicionales mediante OUTER APPLY (solo aplican cuando PO_AUX existe)
+OUTER APPLY (
+     SELECT PO_AUX2.NBILLNUM 
+     FROM PREMIUM_MO PO_AUX2 
+     WHERE PO_AUX2.nreceipt = PO_AUX.nreceipt 
+       AND PO_AUX2.NBILLNUM = PO_AUX.NBILLNUM 
+       AND PO_AUX2.NTYPE IN (42)                   
+       AND NVL(PO_AUX2.NNULLCODE, 0) = 0
+) tblFA
+
+OUTER APPLY (
+    SELECT B1.NBILLNUM AS NroFactAnterior
+         , B1.dcompdate AS FechaCambioFact
+    FROM BILLS B1
+    WHERE B1.NBordereaux = CF1.Nbordereaux
+      AND B1.Nbillstat = 2   -- anulado
+      AND B1.Nnullcode = 11  -- Cambio de Factura
+) tblCambioDeFactura
+
+WHERE  (PO_AUX.Nbordereaux IS NOT NULL OR CON.NBORDEREAUX IS NOT NULL)
+   --AND CF1.Nbordereaux = 609
+GROUP BY CF1.Nbordereaux
 ) 
 ,cteRecibos_EnRelacion AS (
    SELECT CF1.Nbordereaux
