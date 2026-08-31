@@ -10,9 +10,13 @@ CREATE OR REPLACE PROCEDURE INSUDB.NS_INSCONTROLINGRESO511
 /*             6 -  NOFFICE           	: CODIGO REGIONAL DE COBRO               */
 /*             7 -  NINTERTYP  			: CODIGO TIPO DE INTERMEDIARIO           */
 /*             8 -  NINTERMED   		: CODIGO DE INTERMEDIARIO                */
-/*			   9 - NCASHNUM				: CODIGO DEL CAJERO						*/
+/*			   9 - NCASHNUM				: CODIGO DEL CAJERO						 */
 /*             10 - NERROR               : CODIGO DE ERROR                       */
-/*             11 - SERRORDESC          : DESCRIPCION DEL ERROR                 */
+/*             11 - SERRORDESC          : DESCRIPCION DEL ERROR                  */
+/* INFORMATION:                                                                  */
+/*     $Author:: GEORGE NOTO ISSA                                                */
+/*     $Date:: 01/01/2026 $                                                      */
+/*     $LastUpdate:: 31/08/2026                                                  */
 /*-------------------------------------------------------------------------------*/
    (SKEY                	T_INTERFACE.SKEY%TYPE,
 	NSHEET              	MASTERSHEET.NSHEET%TYPE,
