@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "oracle-dba",
+  "instructions": ["master_ai_instructions.md", "intrucciones_copilot.md"],
+  "references": {
+    "schema": {
+      "path": "./esquema_Visualtime.md",
+      "description": "Estructura completa del esquema VisualTime: tablas, columnas, PK/FK, índices, vistas"
+    },
+    "queries": {
+      "path": "./consultas_existentes.md",
+      "description": "Procedimientos, funciones, vistas y consultas PL/SQL existentes en el proyecto"
+    }
+  },
+  "mcp": {
+    "oracle-db": {
+      "type": "local",
+      "command": ["python", "mcp_oracle/server.py"],
+      "enabled": true,
+      "env": {
+        "ORACLE_USER": "{env:ORACLE_USER}",
+        "ORACLE_PASSWORD": "{env:ORACLE_PASSWORD}",
+        "ORACLE_DSN": "{env:ORACLE_DSN}"
+      }
+    }
+  },
+  "permission": {
+    "bash": { "python *": "allow", "sqlcl *": "ask", "*": "ask" }
+  }
+}

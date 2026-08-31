@@ -21,7 +21,9 @@ select * from T_ERR_INTERFACE order by dcompdate desc
 SELECT * FROM MASTERSHEET Where Nsheet IN ('511','512','513','514','515')
 SELECT * FROM FIELDSHEET Where Nsheet IN ('511','512','513','514','515')
 SELECT * FROM WINDOWS WHERE SCODISPL IN ('INT511','INT512','INT513','INT514','INT515')
-
+--############### APERTURAS Y CIERRES DE CAJAS  ###############
+SELECT * FROM CASH_STAT where ncashnum=50 order by DSTATDATE DESC
+SELECT * from TABLE5562
 --############### PROVEEDORES  ###############
 -- SSTATREGT --> ESTADOS DE PROVEEDORES
 SELECT * FROM TABLE26
