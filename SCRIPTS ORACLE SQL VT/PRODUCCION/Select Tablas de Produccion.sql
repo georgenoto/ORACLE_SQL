@@ -23,10 +23,10 @@ select * from DISCO_EXPR Where NDISEXPRC=20
 select * from DISCO_EXPR ORDER BY NDISEXPRC,NDINSUR_TYPE 
 -------------------------------------------------------
 -- ROLES: Contratante, titular, etc.
-select crol.sdescript,rol.* 
-from roles rol 
-inner join Table12 cRol on rol.nrole= cRol.nrole
-where  npolicy=1946 and scertype=2  and nbranch=5 and nproduct=700
+SELECT  T12.SDESCRIPT NOMBRE_ROL, R.*
+ FROM ROLES R
+ INNER JOIN TABLE12 T12 ON R.NROLE= T12.NROLE
+ WHERE R.SCERTYPE=2 AND R.NBRANCH=5 AND R.NPOLICY=593
 
 select * from CLIDOCUMENTS  where sclient='00000000003669' and ntypclientdoc=3
 SELECT * FROM FORMATVALUES
@@ -59,6 +59,10 @@ select * from TAble5006 -- Tipo Persona
 select * from COMMISSION where npolicy=1569 -- Distribucion de Comision por Intermediario  
 select * from COMM_POL where npolicy=1558
 select * from INTERM_TYP
+-----------------------------------------------------------
+--- CONTRATO DE ESTIPENDIO - PARA OFERENTES
+ SELECT * FROM STIPEND_POL   
+ SELECT * FROM CONTRAT_PAY
 ------------------------------------------------------------
 -- DIRECCIONES
 select * from Address where sclient='00000000003759'--- npolicy=
@@ -73,7 +77,7 @@ select * from modules where  npolicy=1536 and scertype=2  and nbranch=5 and npro
 select * from TAB_MODUL where Nmodulec in (20,30) and nbranch=5 and nproduct=700
 
 select * from TABLE9214 where NGEOGRAPHAREA=1 -- NGEOGRAPHAREA -- AMBITO GEOGRAFICO
-select * from TABLE9215 where NATTENSYSTEM=2 -- NATTENSYSTEM  -- SISTEMA DE ATENCIÓN
+select * from TABLE9215 where NATTENSYSTEM=2 -- NATTENSYSTEM  -- SISTEMA DE ATENCIï¿½N
 
 -----------------------------------------------------------
 --- Documentos solicitados para vida

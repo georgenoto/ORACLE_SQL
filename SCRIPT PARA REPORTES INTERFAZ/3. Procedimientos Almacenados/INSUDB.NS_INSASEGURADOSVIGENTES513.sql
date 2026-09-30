@@ -163,14 +163,16 @@ INSERT INTO TIMETMP.TMP_INT513
                                             --AND COB.NMODULEC = BENEF.NMODULEC 
                                             AND COB.NCOVER = BENEF.NCOVER 
                                             AND COB.SCLIENT = BENEF.SCLIENT 
-                                            AND BENEF.DNULLDATE IS NULL
+                                            AND (BENEF.DNULLDATE IS NULL
+                                            OR  TO_DATE(DFECHA_HASTA , 'DD-MM-YYYY') < BENEF.DNULLDATE)
         LEFT JOIN LEND_AGREE_PRES LAGRE     ON COB.NBRANCH = LAGRE.NBRANCH 
                                             AND COB.NPRODUCT = LAGRE.NPRODUCT 
                                             AND COB.NPOLICY = LAGRE.NPOLICY
                                             --AND COB.NMODULEC = LAGRE.NMODULEC 
                                             AND COB.SCLIENT = LAGRE.SCLIENT  
                                             AND COB.NCOVER = LAGRE.NCOVER
-                                            AND LAGRE.DNULLDATE IS NULL
+                                            AND (LAGRE.DNULLDATE IS NULL
+                                            OR  TO_DATE(DFECHA_HASTA , 'DD-MM-YYYY') < LAGRE.DNULLDATE )
         LEFT JOIN AGREEMENT AGRE     ON LAGRE.NCOD_AGREE = AGRE.NCOD_AGREE
         LEFT JOIN CLIENT CLI     ON AGRE.SCLIENT = CLI.SCLIENT
         WHERE COB.DNULLDATE IS NULL
